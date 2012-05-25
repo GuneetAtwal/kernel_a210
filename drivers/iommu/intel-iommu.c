@@ -2297,6 +2297,7 @@ info = alloc_devinfo_mem();
 if (!info)
 return -ENOMEM;
 
+<<<<<<< HEAD
 info->segment = pci_domain_nr(pdev->bus);
 info->bus = pdev->bus->number;
 info->devfn = pdev->devfn;
@@ -2308,6 +2309,12 @@ list_add(&info->link, &domain->devices);
 list_add(&info->global, &device_domain_list);
 pdev->dev.archdata.iommu = info;
 spin_unlock_irqrestore(&device_domain_lock, flags);
+
+	info->segment = pci_domain_nr(pdev->bus);
+	info->bus = pdev->bus->number;
+	info->devfn = pdev->devfn;
+	info->dev = pdev;
+	info->domain = domain;
 
 ret = domain_context_mapping(domain, pdev, translation);
 if (ret) {
@@ -2339,6 +2346,18 @@ return true;
 }
 }
 return false;
+	ret = domain_context_mapping(domain, pdev, translation);
+	if (ret) {
+		spin_lock_irqsave(&device_domain_lock, flags);
+		list_del(&info->link);
+		list_del(&info->global);
+		pdev->dev.archdata.iommu = NULL;
+		spin_unlock_irqrestore(&device_domain_lock, flags);
+		free_devinfo_mem(info);
+		return ret;
+	}
+
+	return 0;
 }
 
 static int iommu_should_identity_map(struct pci_dev *pdev, int startup)
