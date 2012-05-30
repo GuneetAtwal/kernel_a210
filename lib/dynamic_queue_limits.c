@@ -25,8 +25,6 @@ void dql_completed(struct dql *dql, unsigned int count)
 //Update Patch from Google
 //https://android.googlesource.com/kernel/common/+/4f4bdaeb40df95499c1ee7ea3fbca9d76174a59e%5E..4f4bdaeb40df95499c1ee7ea3fbca9d76174a59e/#F0
 	unsigned int ovlimit, completed, num_queued;
-
-	unsigned int ovlimit, completed,num_queued;
 	bool all_prev_completed;
 
 	num_queued = ACCESS_ONCE(dql->num_queued);
