@@ -1100,6 +1100,7 @@ static int aif1clk_ev(struct snd_soc_dapm_widget *w,
 
     case SND_SOC_DAPM_POST_PMU:
 
+	case SND_SOC_DAPM_POST_PMU:
 		for (i = 0; i < ARRAY_SIZE(wm8994_vu_bits); i++)
 			snd_soc_write(codec, wm8994_vu_bits[i].reg,
 				      snd_soc_read(codec,
@@ -1183,6 +1184,7 @@ static int aif2clk_ev(struct snd_soc_dapm_widget *w,
 		break;
 
     case SND_SOC_DAPM_POST_PMU:
+	case SND_SOC_DAPM_POST_PMU:
 		for (i = 0; i < ARRAY_SIZE(wm8994_vu_bits); i++)
 			snd_soc_write(codec, wm8994_vu_bits[i].reg,
 				      snd_soc_read(codec,
