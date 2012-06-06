@@ -1,0 +1,1 @@
+cmd_mediatek/kernel/drivers/usb20/built-in.o :=  /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.6/bin/arm-linux-androideabi-ld.bfd -EL    -r -o mediatek/kernel/drivers/usb20/built-in.o mediatek/kernel/drivers/usb20/musb_hdrc.o 

@@ -1,0 +1,1 @@
+cmd_mediatek/kernel/drivers/xlog/built-in.o :=  /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.6/bin/arm-linux-androideabi-ld.bfd -EL    -r -o mediatek/kernel/drivers/xlog/built-in.o mediatek/kernel/drivers/xlog/xlog.o 

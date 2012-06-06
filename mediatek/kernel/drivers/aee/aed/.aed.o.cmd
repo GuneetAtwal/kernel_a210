@@ -1,0 +1,1 @@
+cmd_mediatek/kernel/drivers/aee/aed/aed.o := /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.6/bin/arm-linux-androideabi-ld.bfd -EL    -r -o mediatek/kernel/drivers/aee/aed/aed.o mediatek/kernel/drivers/aee/aed/aed-main.o mediatek/kernel/drivers/aee/aed/aed-debug.o mediatek/kernel/drivers/aee/aed/aed-process.o 

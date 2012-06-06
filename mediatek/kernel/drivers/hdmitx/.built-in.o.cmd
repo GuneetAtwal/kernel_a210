@@ -1,0 +1,1 @@
+cmd_mediatek/kernel/drivers/hdmitx/built-in.o :=  /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.6/bin/arm-linux-androideabi-ld.bfd -EL    -r -o mediatek/kernel/drivers/hdmitx/built-in.o mediatek/kernel/drivers/hdmitx/hdmitx.o mediatek/kernel/drivers/hdmitx/debug.o mediatek/kernel/drivers/hdmitx/wfd.o mediatek/kernel/drivers/hdmitx/hdmitx_test.o 
