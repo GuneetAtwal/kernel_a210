@@ -554,6 +554,10 @@ static const struct option_blacklist_info net_intf1_blacklist = {
 	.reserved = BIT(1),
 };
 
+static const struct option_blacklist_info net_intf2_blacklist = {
+	.reserved = BIT(2),
+};
+
 static const struct option_blacklist_info net_intf3_blacklist = {
 	.reserved = BIT(3),
 };
@@ -1117,6 +1121,8 @@ static const struct usb_device_id option_ids[] = {
     { USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x1596, 0xff, 0xff, 0xff) },
     { USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x1598, 0xff, 0xff, 0xff) },
     { USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x1600, 0xff, 0xff, 0xff) },
+	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x1402, 0xff, 0xff, 0xff),
+		.driver_info = (kernel_ulong_t)&net_intf2_blacklist },
 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x2002, 0xff,
 	  0xff, 0xff), .driver_info = (kernel_ulong_t)&zte_k3765_z_blacklist },
 	{ USB_DEVICE_AND_INTERFACE_INFO(ZTE_VENDOR_ID, 0x2003, 0xff, 0xff, 0xff) },
