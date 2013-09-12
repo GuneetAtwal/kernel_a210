@@ -12,6 +12,14 @@ config IOSCHED_NOOP
 	  that do their own scheduling and require only minimal assistance from
 	  the kernel.
 
+config IOSCHED_FIOPS
+	tristate "IOPS based I/O scheduler"
+	default y
+	---help---
+	  This is an IOPS based I/O scheduler. It will try to distribute
+         IOPS equally among all processes in the system. It's mainly for
+          Flash based storage.
+
 config IOSCHED_DEADLINE
 	tristate "Deadline I/O scheduler"
 	default y
@@ -53,6 +61,9 @@ choice
 	config DEFAULT_DEADLINE
 		bool "Deadline" if IOSCHED_DEADLINE=y
 
+    config DEFAULT_FIOPS
+		bool "FIOPS" if IOSCHED_FIOPS=y
+
 	config DEFAULT_CFQ
 		bool "CFQ" if IOSCHED_CFQ=y
 
@@ -64,6 +75,7 @@ endchoice
 config DEFAULT_IOSCHED
 	string
 	default "deadline" if DEFAULT_DEADLINE
+	default "fiops" if DEFAULT_FIOPS
 	default "cfq" if DEFAULT_CFQ
 	default "noop" if DEFAULT_NOOP
 
