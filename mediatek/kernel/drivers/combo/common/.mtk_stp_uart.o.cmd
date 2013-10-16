@@ -1,1 +1,0 @@
-cmd_mediatek/kernel/drivers/combo/common/mtk_stp_uart.o := /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.6/bin/arm-linux-androideabi-ld.bfd -EL    -r -o mediatek/kernel/drivers/combo/common/mtk_stp_uart.o mediatek/kernel/drivers/combo/common/linux/pri/stp_uart.o 

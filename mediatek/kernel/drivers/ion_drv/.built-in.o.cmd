@@ -1,1 +1,0 @@
-cmd_mediatek/kernel/drivers/ion_drv/built-in.o :=  /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.6/bin/arm-linux-androideabi-ld.bfd -EL    -r -o mediatek/kernel/drivers/ion_drv/built-in.o mediatek/kernel/drivers/ion_drv/ion_drv.o mediatek/kernel/drivers/ion_drv/ion_mm_heap.o mediatek/kernel/drivers/ion_drv/ion_sys_contig_heap.o 

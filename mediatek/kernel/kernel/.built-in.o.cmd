@@ -1,1 +1,0 @@
-cmd_mediatek/kernel/kernel/built-in.o :=  /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.6/bin/arm-linux-androideabi-ld.bfd -EL    -r -o mediatek/kernel/kernel/built-in.o mediatek/kernel/kernel/mt_storage_logger.o mediatek/kernel/kernel/mt_io_logger.o 

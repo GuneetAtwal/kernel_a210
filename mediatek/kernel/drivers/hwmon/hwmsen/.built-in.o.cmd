@@ -1,1 +1,0 @@
-cmd_mediatek/kernel/drivers/hwmon/hwmsen/built-in.o :=  /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.6/bin/arm-linux-androideabi-ld.bfd -EL    -r -o mediatek/kernel/drivers/hwmon/hwmsen/built-in.o mediatek/kernel/drivers/hwmon/hwmsen/hwmsen_helper.o mediatek/kernel/drivers/hwmon/hwmsen/hwmsen_dev.o 

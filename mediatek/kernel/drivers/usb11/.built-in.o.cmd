@@ -1,1 +1,0 @@
-cmd_mediatek/kernel/drivers/usb11/built-in.o :=  rm -f mediatek/kernel/drivers/usb11/built-in.o; /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.6/bin/arm-linux-androideabi-ar rcsD mediatek/kernel/drivers/usb11/built-in.o
