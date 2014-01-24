@@ -353,9 +353,12 @@ static int ashmem_shrink(struct shrinker *s, struct shrink_control *sc)
 	if (!sc->nr_to_scan)
 		return lru_count;
 
+<<<<<<< HEAD
 	//To avoid deadlock when memory is shortage
         if (!mutex_trylock(&ashmem_mutex))
 
+=======
+>>>>>>> 0d2d235... staging: android: ashmem: Avoid deadlock with mmap/shrink
 	if (!mutex_trylock(&ashmem_mutex))
 		return -1;
 
