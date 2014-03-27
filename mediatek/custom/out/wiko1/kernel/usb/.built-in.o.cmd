@@ -1,0 +1,1 @@
+cmd_mediatek/custom/out/wiko/kernel/usb/built-in.o :=  /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.6/bin/arm-linux-androideabi-ld.bfd -EL    -r -o mediatek/custom/out/wiko/kernel/usb/built-in.o mediatek/custom/out/wiko/kernel/usb/mtk_usb_custom.o 
