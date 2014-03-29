@@ -1,0 +1,10 @@
+--- drivers/net/ethernet/freescale/gianfar_ptp.c
++++ drivers/net/ethernet/freescale/gianfar_ptp.c
+@@ -520,6 +520,7 @@
+ 	return 0;
+ 
+ no_clock:
++	iounmap(etsects->regs);
+ no_ioremap:
+ 	release_resource(etsects->rsrc);
+ no_resource:
