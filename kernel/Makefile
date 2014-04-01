@@ -198,7 +198,7 @@ export KBUILD_BUILDHOST := $(SUBARCH)
 #ARCH		?= arm
 #CROSS_COMPILE	?= $(CONFIG_CROSS_COMPILE:"%"=%)
 ARCH		?= arm
-CROSS_COMPILE	?= /home/guneetatwal/android/kernel/toolchains/arm-linux-androideabi-4.7/bin/arm-linux-androideabi-
+CROSS_COMPILE	?= 
 
 # Architecture as present in compile.h
 UTS_MACHINE 	:= $(ARCH)
@@ -252,7 +252,7 @@ HOSTCC       = gcc
 HOSTCXX      = g++
 ifdef CONFIG_CC_OPTIMIZE_ALOT
 HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -fsingle-precision-constant -ftree-vectorize -fomit-frame-pointer
-HOSTCXXFLAGS = -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -fsingle-precision-constant -marm -mfpu=neon-vfpv4 -ftree-vectorize -mvectorize-with-neon-quad
+HOSTCXXFLAGS = -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -fsingle-precision-constant -mcpu=cortex-a7 -mtune=cortex-a7 -marm -mfpu=neon-vfpv4 -ftree-vectorize -mvectorize-with-neon-quad
 else
 HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer
 HOSTCXXFLAGS = -O2
@@ -358,19 +358,19 @@ CHECK		= sparse
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void $(CF)
 ifdef CONFIG_CC_OPTIMIZE_ALOT
-MODFLAGS	= -DMODULE -O2 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -fsingle-precision-constant -mcpu=cortex-a15 -mtune=cortex-a15 -fno-pic -marm -mfpu=neon-vfpv4 -ftree-vectorize -mvectorize-with-neon-quad
+MODFLAGS	= -DMODULE -O2 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -fsingle-precision-constant -mcpu=cortex-a7 -mtune=cortex-a7 -fno-pic -marm -mfpu=neon-vfpv4 -ftree-vectorize -mvectorize-with-neon-quad
 else
-MODFLAGS	= -DMODULE -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mtune=cortex-a8 -fno-pic -marm -mfpu=neon -ftree-vectorize -mvectorize-with-neon-quad
+MODFLAGS	= -DMODULE -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mtune=cortex-a7 -fno-pic -marm -mfpu=neon -ftree-vectorize -mvectorize-with-neon-quad
 endif
 
 CFLAGS_MODULE   = $(MODFLAGS)
 AFLAGS_MODULE   = $(MODFLAGS)
 LDFLAGS_MODULE  = -T $(srctree)/scripts/module-common.lds
 ifdef CONFIG_CC_OPTIMIZE_ALOT
-CFLAGS_KERNEL	= -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mtune=cortex-a15 -marm -mfpu=neon-vfpv4 -funswitch-loops -mvectorize-with-neon-quad
-AFLAGS_KERNEL	= -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mtune=cortex-a15 -marm -mfpu=neon-vfpv4 -funswitch-loops -mvectorize-with-neon-quad
+CFLAGS_KERNEL	= -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mtune=cortex-a7 -marm -mfpu=neon-vfpv4 -funswitch-loops -mvectorize-with-neon-quad
+AFLAGS_KERNEL	= -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mtune=cortex-a7 -marm -mfpu=neon-vfpv4 -funswitch-loops -mvectorize-with-neon-quad
 else
-CFLAGS_KERNEL	= -O2 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mtune=cortex-a15 -marm -mfpu=neon-vfpv4 -funswitch-loops -mvectorize-with-neon-quad
+CFLAGS_KERNEL	= -O2 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mtune=cortex-a7 -marm -mfpu=neon-vfpv4 -funswitch-loops -mvectorize-with-neon-quad
 AFLAGS_KERNEL	= 
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
 endif
@@ -395,8 +395,8 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
            -Wno-format-security -Wno-unused-function -Wno-array-bounds -Wno-uninitialized \
 		   -fno-delete-null-pointer-checks -Wno-unused-variable -Wno-maybe-uninitialized -Wno-cpp -Wno-declaration-after-statement
 ifdef CONFIG_CC_OPTIMIZE_ALOT
-KBUILD_AFLAGS_KERNEL := -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -fsingle-precision-constant -marm -mfpu=neon-vfpv4 -ftree-vectorize -mvectorize-with-neon-quad
-KBUILD_CFLAGS_KERNEL := -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -fsingle-precision-constant -marm -mfpu=neon-vfpv4 -ftree-vectorize -mvectorize-with-neon-quad
+KBUILD_AFLAGS_KERNEL := -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -fsingle-precision-constant -mcpu=cortex-a7 -mtune=cortex-a7 -marm -mfpu=neon-vfpv4 -ftree-vectorize -mvectorize-with-neon-quad
+KBUILD_CFLAGS_KERNEL := -O3 -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -fsingle-precision-constant -mcpu=cortex-a7 -mtune=cortex-a7 -marm -mfpu=neon-vfpv4 -ftree-vectorize -mvectorize-with-neon-quad
 else		   
 		   -mfpu=neon-vfpv4 \
 		   -mfloat-abi=softfp
@@ -404,7 +404,7 @@ KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS   := -D__ASSEMBLY__
 KBUILD_AFLAGS_MODULE  := -DMODULE
-KBUILD_CFLAGS_MODULE  := -DMODULE -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mfpu=neon-vfpv4 -ftree-vectorize -funswitch-loops -Wno-cpp
+KBUILD_CFLAGS_MODULE  := -DMODULE -fgcse-lm -fgcse-sm -fsched-spec-load -fforce-addr -ffast-math -fsingle-precision-constant -mcpu=cortex-a7 -mtune=cortex-a7 -mfpu=neon-vfpv4 -ftree-vectorize -funswitch-loops -Wno-cpp
 KBUILD_LDFLAGS_MODULE := -T $(srctree)/scripts/module-common.lds
 
 -include $(srctree)/$(MTK_PROJECT)_mtk_cust.mak
