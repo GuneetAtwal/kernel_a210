@@ -236,10 +236,14 @@ int tracing_is_enabled(void)
  * to not have to wait for all that output. Anyway this can be
  * boot time and run time configurable.
  */
-// #define TRACE_BUF_SIZE_DEFAULT	1441792UL /* 16384 * 88 (sizeof(entry)) */
-#define TRACE_BUF_SIZE_DEFAULT	5767168UL /* 16384 * 88 *4 (sizeof(entry)) */
+ #define TRACE_BUF_SIZE_DEFAULT	1441792UL /* 16384 * 88 (sizeof(entry)) */
 
 static unsigned long		trace_buf_size = TRACE_BUF_SIZE_DEFAULT;
+
+#ifdef CONFIG_MTK_SCHED_TRACERS
+static unsigned long        trace_buf_size_cpu0 = 6291456UL;
+static unsigned long        trace_buf_size_cpuX = 5242880UL;
+#endif
 
 /* trace_types holds a link list of available tracers. */
 static struct tracer		*trace_types __read_mostly;
@@ -338,9 +342,17 @@ static inline void trace_access_lock_init(void)
 static DECLARE_WAIT_QUEUE_HEAD(trace_wait);
 
 /* trace_flags holds trace_options default values */
+#ifdef CONFIG_MTK_SCHED_TRACERS
+unsigned long trace_flags = TRACE_ITER_PRINT_PARENT | TRACE_ITER_PRINTK |
+	TRACE_ITER_ANNOTATE | TRACE_ITER_CONTEXT_INFO | TRACE_ITER_SLEEP_TIME |
+	TRACE_ITER_GRAPH_TIME | TRACE_ITER_RECORD_CMD ;
+    //mtk04259: remove TRACE_ITER_OVERWRITE by default for boot-time ftrace
+    //          it will be resotred after collecting is done
+#else
 unsigned long trace_flags = TRACE_ITER_PRINT_PARENT | TRACE_ITER_PRINTK |
 	TRACE_ITER_ANNOTATE | TRACE_ITER_CONTEXT_INFO | TRACE_ITER_SLEEP_TIME |
 	TRACE_ITER_GRAPH_TIME | TRACE_ITER_RECORD_CMD | TRACE_ITER_OVERWRITE ;
+#endif
 
 static int trace_stop_count;
 static DEFINE_RAW_SPINLOCK(tracing_start_lock);
@@ -394,6 +406,28 @@ void tracing_off(void)
 }
 EXPORT_SYMBOL_GPL(tracing_off);
 
+#ifdef CONFIG_MTK_SCHED_TRACERS
+// ftrace's switch function for MTK solution
+void mt_ftrace_enable_disable(int enable){
+    if (enable) {
+        trace_set_clr_event(NULL, "sched_switch", 1);
+        trace_set_clr_event(NULL, "sched_wakeup", 1);
+        trace_set_clr_event(NULL, "sched_wakeup_new", 1);
+        trace_set_clr_event(NULL, "irq_handler_entry", 1);
+        trace_set_clr_event(NULL, "irq_handler_exit", 1);
+#if CONFIG_SMP
+        trace_set_clr_event(NULL, "sched_migrate_task", 1);
+#endif
+        tracing_on();
+    } else {
+        tracing_off();
+        trace_set_clr_event(NULL, NULL, 0);
+    }
+
+}
+EXPORT_SYMBOL(mt_ftrace_enable_disable);
+#endif
+
 /**
  * tracing_is_on - show state of ring buffers enabled
  */
@@ -438,15 +472,15 @@ __setup("trace_buf_size=", set_buf_size);
 
 static int __init set_tracing_thresh(char *str)
 {
-	unsigned long threshhold;
+	unsigned long threshold;
 	int ret;
 
 	if (!str)
 		return 0;
-	ret = strict_strtoul(str, 0, &threshhold);
+	ret = strict_strtoul(str, 0, &threshold);
 	if (ret < 0)
 		return 0;
-	tracing_thresh = threshhold * 1000;
+	tracing_thresh = threshold * 1000;
 	return 1;
 }
 __setup("tracing_thresh=", set_tracing_thresh);
@@ -841,7 +875,8 @@ __acquires(kernel_lock)
 
 		/* If we expanded the buffers, make sure the max is expanded too */
 		if (ring_buffer_expanded && type->use_max_tr)
-			ring_buffer_resize(max_tr.buffer, trace_buf_size);
+			ring_buffer_resize(max_tr.buffer, trace_buf_size,
+						RING_BUFFER_ALL_CPUS);
 
 		/* the test is responsible for initializing and enabling */
 		pr_info("Testing tracer %s: ", type->name);
@@ -857,7 +892,8 @@ __acquires(kernel_lock)
 
 		/* Shrink the max buffer again */
 		if (ring_buffer_expanded && type->use_max_tr)
-			ring_buffer_resize(max_tr.buffer, 1);
+			ring_buffer_resize(max_tr.buffer, 1,
+						RING_BUFFER_ALL_CPUS);
 
 		printk(KERN_CONT "PASSED\n");
 	}
@@ -1061,6 +1097,7 @@ void tracing_stop(void)
 	unsigned long flags;
 
 	ftrace_stop();
+
 	raw_spin_lock_irqsave(&tracing_start_lock, flags);
 	if (trace_stop_count++)
 		goto out;
@@ -2501,6 +2538,7 @@ static int tracing_release(struct inode *inode, struct file *file)
 	if (iter->trace && iter->trace->close)
 		iter->trace->close(iter);
 
+    printk("[ftrace]end reading trace file\n");
 	/* reenable tracing if it was previously enabled */
 	tracing_start();
 	mutex_unlock(&trace_types_lock);
@@ -2523,6 +2561,7 @@ static int tracing_open(struct inode *inode, struct file *file)
 	    (file->f_flags & O_TRUNC)) {
 		long cpu = (long) inode->i_private;
 
+        printk("[ftrace]reset trace file\n");
 		if (cpu == TRACE_PIPE_ALL_CPU)
 			tracing_reset_online_cpus(&global_trace);
 		else
@@ -2530,6 +2569,7 @@ static int tracing_open(struct inode *inode, struct file *file)
 	}
 
 	if (file->f_mode & FMODE_READ) {
+        printk("[ftrace]start reading trace file\n");
 		iter = __tracing_open(inode, file);
 		if (IS_ERR(iter))
 			ret = PTR_ERR(iter);
@@ -2695,12 +2735,12 @@ tracing_cpumask_write(struct file *filp, const char __user *ubuf,
 		if (cpumask_test_cpu(cpu, tracing_cpumask) &&
 				!cpumask_test_cpu(cpu, tracing_cpumask_new)) {
 			atomic_inc(&global_trace.data[cpu]->disabled);
-			ring_buffer_record_disable_cpu(global_trace.buffer, cpu);
+            ring_buffer_record_disable_cpu(global_trace.buffer, cpu);
 		}
 		if (!cpumask_test_cpu(cpu, tracing_cpumask) &&
 				cpumask_test_cpu(cpu, tracing_cpumask_new)) {
 			atomic_dec(&global_trace.data[cpu]->disabled);
-			ring_buffer_record_enable_cpu(global_trace.buffer, cpu);
+            ring_buffer_record_enable_cpu(global_trace.buffer, cpu);
 		}
 	}
 	arch_spin_unlock(&ftrace_max_lock);
@@ -2789,7 +2829,7 @@ static int set_tracer_option(struct tracer *trace, char *cmp, int neg)
 	return -EINVAL;
 }
 
-static void set_tracer_flags(unsigned int mask, int enabled)
+void set_tracer_flags(unsigned int mask, int enabled)
 {
 	/* do nothing if flag is already set */
 	if (!!(trace_flags & mask) == !!enabled)
@@ -3024,7 +3064,14 @@ int tracer_init(struct tracer *t, struct trace_array *tr)
 	return t->init(tr);
 }
 
-static int __tracing_resize_ring_buffer(unsigned long size)
+static void set_buffer_entries(struct trace_array *tr, unsigned long val)
+{
+	int cpu;
+	for_each_tracing_cpu(cpu)
+		tr->data[cpu]->entries = val;
+}
+
+static int __tracing_resize_ring_buffer(unsigned long size, int cpu)
 {
 	int ret;
 
@@ -3035,19 +3082,38 @@ static int __tracing_resize_ring_buffer(unsigned long size)
 	 */
 	ring_buffer_expanded = 1;
 
-	ret = ring_buffer_resize(global_trace.buffer, size);
+	ret = ring_buffer_resize(global_trace.buffer, size, cpu);
+
+    if(cpu == RING_BUFFER_ALL_CPUS)
+        printk("[ftrace]buffer size is configured as %lu KB on each cpu\n", size>>10);
+    else 
+        printk("[ftrace]buffer size is configured as %lu KB on cpu%d\n", size>>10, cpu);
+
 	if (ret < 0)
 		return ret;
 
 	if (!current_trace->use_max_tr)
 		goto out;
 
-	ret = ring_buffer_resize(max_tr.buffer, size);
+	ret = ring_buffer_resize(max_tr.buffer, size, cpu);
 	if (ret < 0) {
-		int r;
+		int r = 0;
 
-		r = ring_buffer_resize(global_trace.buffer,
-				       global_trace.entries);
+		if (cpu == RING_BUFFER_ALL_CPUS) {
+			int i;
+			for_each_tracing_cpu(i) {
+				r = ring_buffer_resize(global_trace.buffer,
+						global_trace.data[i]->entries,
+						i);
+				if (r < 0)
+					break;
+			}
+		} else {
+			r = ring_buffer_resize(global_trace.buffer,
+						global_trace.data[cpu]->entries,
+						cpu);
+		}
+
 		if (r < 0) {
 			/*
 			 * AARGH! We are left with different
@@ -3069,14 +3135,21 @@ static int __tracing_resize_ring_buffer(unsigned long size)
 		return ret;
 	}
 
-	max_tr.entries = size;
+	if (cpu == RING_BUFFER_ALL_CPUS)
+		set_buffer_entries(&max_tr, size);
+	else
+		max_tr.data[cpu]->entries = size;
+
  out:
-	global_trace.entries = size;
+	if (cpu == RING_BUFFER_ALL_CPUS)
+		set_buffer_entries(&global_trace, size);
+	else
+		global_trace.data[cpu]->entries = size;
 
 	return ret;
 }
 
-static ssize_t tracing_resize_ring_buffer(unsigned long size)
+static ssize_t tracing_resize_ring_buffer(unsigned long size, int cpu_id)
 {
 	int cpu, ret = size;
 
@@ -3092,12 +3165,19 @@ static ssize_t tracing_resize_ring_buffer(unsigned long size)
 			atomic_inc(&max_tr.data[cpu]->disabled);
 	}
 
-	if (size != global_trace.entries)
-		ret = __tracing_resize_ring_buffer(size);
+	if (cpu_id != RING_BUFFER_ALL_CPUS) {
+		/* make sure, this cpu is enabled in the mask */
+		if (!cpumask_test_cpu(cpu_id, tracing_buffer_mask)) {
+			ret = -EINVAL;
+			goto out;
+		}
+	}
 
+	ret = __tracing_resize_ring_buffer(size, cpu_id);
 	if (ret < 0)
 		ret = -ENOMEM;
 
+out:
 	for_each_tracing_cpu(cpu) {
 		if (global_trace.data[cpu])
 			atomic_dec(&global_trace.data[cpu]->disabled);
@@ -3125,10 +3205,25 @@ static ssize_t tracing_resize_ring_buffer(unsigned long size)
 int tracing_update_buffers(void)
 {
 	int ret = 0;
+    int i = 0;
 
 	mutex_lock(&trace_types_lock);
 	if (!ring_buffer_expanded)
-		ret = __tracing_resize_ring_buffer(trace_buf_size);
+#ifdef CONFIG_MTK_SCHED_TRACERS
+    {
+        for_each_tracing_cpu(i){
+            ret = __tracing_resize_ring_buffer((i==0?trace_buf_size_cpu0:trace_buf_size_cpuX), i); 
+            if(ret < 0){
+                printk("[ftrace]fail to update cpu%d ring buffer to %lu KB \n",
+                        i, (i==0?(trace_buf_size_cpu0>>10):(trace_buf_size_cpuX>>10)));
+                break;
+            }
+        }
+    }
+#else
+		ret = __tracing_resize_ring_buffer(trace_buf_size,
+						RING_BUFFER_ALL_CPUS);
+#endif
 	mutex_unlock(&trace_types_lock);
 
 	return ret;
@@ -3152,7 +3247,8 @@ static int tracing_set_tracer(const char *buf)
 	mutex_lock(&trace_types_lock);
 
 	if (!ring_buffer_expanded) {
-		ret = __tracing_resize_ring_buffer(trace_buf_size);
+		ret = __tracing_resize_ring_buffer(trace_buf_size,
+						RING_BUFFER_ALL_CPUS);
 		if (ret < 0)
 			goto out;
 		ret = 0;
@@ -3178,8 +3274,8 @@ static int tracing_set_tracer(const char *buf)
 		 * The max_tr ring buffer has some state (e.g. ring->clock) and
 		 * we want preserve it.
 		 */
-		ring_buffer_resize(max_tr.buffer, 1);
-		max_tr.entries = 1;
+		ring_buffer_resize(max_tr.buffer, 1, RING_BUFFER_ALL_CPUS);
+		set_buffer_entries(&max_tr, 1);
 	}
 	destroy_trace_option_files(topts);
 
@@ -3187,10 +3283,17 @@ static int tracing_set_tracer(const char *buf)
 
 	topts = create_trace_option_files(current_trace);
 	if (current_trace->use_max_tr) {
-		ret = ring_buffer_resize(max_tr.buffer, global_trace.entries);
-		if (ret < 0)
-			goto out;
-		max_tr.entries = global_trace.entries;
+		int cpu;
+		/* we need to make per cpu buffer sizes equivalent */
+		for_each_tracing_cpu(cpu) {
+			ret = ring_buffer_resize(max_tr.buffer,
+						global_trace.data[cpu]->entries,
+						cpu);
+			if (ret < 0)
+				goto out;
+			max_tr.data[cpu]->entries =
+					global_trace.data[cpu]->entries;
+		}
 	}
 
 	if (t->init) {
@@ -3229,6 +3332,7 @@ tracing_set_trace_write(struct file *filp, const char __user *ubuf,
 	for (i = cnt - 1; i > 0 && isspace(buf[i]); i--)
 		buf[i] = 0;
 
+    printk("[ftrace]set current_tracer to '%s'\n", buf);
 	err = tracing_set_tracer(buf);
 	if (err)
 		return err;
@@ -3613,14 +3717,11 @@ static ssize_t tracing_splice_read_pipe(struct file *filp,
 		.pages		= pages_def,
 		.partial	= partial_def,
 		.nr_pages	= 0, /* This gets updated below. */
-<<<<<<< HEAD
                 /*
                  * kernel patch
                  * commit: 2c07f25ea7800adb36cd8da9b58c4ecd3fc3d064
                  * https://android.googlesource.com/kernel/common/+/2c07f25ea7800adb36cd8da9b58c4ecd3fc3d064%5E!/#F0
                  */
-=======
->>>>>>> 2c07f25... splice: fix racy pipe->buffers uses
 		.nr_pages_max	= PIPE_DEF_BUFFERS,
 		.flags		= flags,
 		.ops		= &tracing_pipe_buf_ops,
@@ -3693,15 +3794,12 @@ static ssize_t tracing_splice_read_pipe(struct file *filp,
 
 	ret = splice_to_pipe(pipe, &spd);
 out:
-<<<<<<< HEAD
         /*
          * kernel patch
          * commit: 2c07f25ea7800adb36cd8da9b58c4ecd3fc3d064
          * https://android.googlesource.com/kernel/common/+/2c07f25ea7800adb36cd8da9b58c4ecd3fc3d064%5E!/#F0
          */
 	//splice_shrink_spd(pipe, &spd);
-=======
->>>>>>> 2c07f25... splice: fix racy pipe->buffers uses
 	splice_shrink_spd(&spd);
 	return ret;
 
@@ -3710,30 +3808,82 @@ out_err:
 	goto out;
 }
 
+struct ftrace_entries_info {
+	struct trace_array	*tr;
+	int			cpu;
+};
+
+static int tracing_entries_open(struct inode *inode, struct file *filp)
+{
+	struct ftrace_entries_info *info;
+
+	if (tracing_disabled)
+		return -ENODEV;
+
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
+
+	info->tr = &global_trace;
+	info->cpu = (unsigned long)inode->i_private;
+
+	filp->private_data = info;
+
+	return 0;
+}
+
 static ssize_t
 tracing_entries_read(struct file *filp, char __user *ubuf,
 		     size_t cnt, loff_t *ppos)
 {
-	struct trace_array *tr = filp->private_data;
-	char buf[96];
-	int r;
+	struct ftrace_entries_info *info = filp->private_data;
+	struct trace_array *tr = info->tr;
+	char buf[64];
+	int r = 0;
+	ssize_t ret;
 
 	mutex_lock(&trace_types_lock);
-	if (!ring_buffer_expanded)
-		r = sprintf(buf, "%lu (expanded: %lu)\n",
-			    tr->entries >> 10,
-			    trace_buf_size >> 10);
-	else
-		r = sprintf(buf, "%lu\n", tr->entries >> 10);
+
+	if (info->cpu == RING_BUFFER_ALL_CPUS) {
+		int cpu, buf_size_same;
+		unsigned long size;
+
+		size = 0;
+		buf_size_same = 1;
+		/* check if all cpu sizes are same */
+		for_each_tracing_cpu(cpu) {
+			/* fill in the size from first enabled cpu */
+			if (size == 0)
+				size = tr->data[cpu]->entries;
+			if (size != tr->data[cpu]->entries) {
+				buf_size_same = 0;
+				break;
+			}
+		}
+
+		if (buf_size_same) {
+			if (!ring_buffer_expanded)
+				r = sprintf(buf, "%lu (expanded: %lu)\n",
+					    size >> 10,
+					    trace_buf_size >> 10);
+			else
+				r = sprintf(buf, "%lu\n", size >> 10);
+		} else
+			r = sprintf(buf, "X\n");
+	} else
+		r = sprintf(buf, "%lu\n", tr->data[info->cpu]->entries >> 10);
+
 	mutex_unlock(&trace_types_lock);
 
-	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+	ret = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+	return ret;
 }
 
 static ssize_t
 tracing_entries_write(struct file *filp, const char __user *ubuf,
 		      size_t cnt, loff_t *ppos)
 {
+	struct ftrace_entries_info *info = filp->private_data;
 	unsigned long val;
 	int ret;
 
@@ -3748,13 +3898,23 @@ tracing_entries_write(struct file *filp, const char __user *ubuf,
 	/* value is in KB */
 	val <<= 10;
 
-	ret = tracing_resize_ring_buffer(val);
+	ret = tracing_resize_ring_buffer(val, info->cpu);
 	if (ret < 0)
 		return ret;
 
 	*ppos += cnt;
 
 	return cnt;
+}
+
+static int
+tracing_entries_release(struct inode *inode, struct file *filp)
+{
+	struct ftrace_entries_info *info = filp->private_data;
+
+	kfree(info);
+
+	return 0;
 }
 
 static ssize_t
@@ -3768,7 +3928,7 @@ tracing_total_entries_read(struct file *filp, char __user *ubuf,
 
 	mutex_lock(&trace_types_lock);
 	for_each_tracing_cpu(cpu) {
-		size += tr->entries >> 10;
+		size += tr->data[cpu]->entries >> 10;
 		if (!ring_buffer_expanded)
 			expanded_size += trace_buf_size >> 10;
 	}
@@ -3802,7 +3962,7 @@ tracing_free_buffer_release(struct inode *inode, struct file *filp)
 	if (trace_flags & TRACE_ITER_STOP_ON_FREE)
 		tracing_off();
 	/* resize the ring buffer to 0 */
-	tracing_resize_ring_buffer(0);
+	tracing_resize_ring_buffer(0, RING_BUFFER_ALL_CPUS);
 
 	return 0;
 }
@@ -4001,9 +4161,10 @@ static const struct file_operations tracing_pipe_fops = {
 };
 
 static const struct file_operations tracing_entries_fops = {
-	.open		= tracing_open_generic,
+	.open		= tracing_entries_open,
 	.read		= tracing_entries_read,
 	.write		= tracing_entries_write,
+	.release	= tracing_entries_release,
 	.llseek		= generic_file_llseek,
 };
 
@@ -4192,14 +4353,11 @@ tracing_buffers_splice_read(struct file *file, loff_t *ppos,
 	struct splice_pipe_desc spd = {
 		.pages		= pages_def,
 		.partial	= partial_def,
-<<<<<<< HEAD
                 /*
                  * kernel patch
                  * commit: 2c07f25ea7800adb36cd8da9b58c4ecd3fc3d064
                  * https://android.googlesource.com/kernel/common/+/2c07f25ea7800adb36cd8da9b58c4ecd3fc3d064%5E!/#F0
                  */
-=======
->>>>>>> 2c07f25... splice: fix racy pipe->buffers uses
 		.nr_pages_max	= PIPE_DEF_BUFFERS,
 		.flags		= flags,
 		.ops		= &buffer_pipe_buf_ops,
@@ -4288,15 +4446,12 @@ tracing_buffers_splice_read(struct file *file, loff_t *ppos,
 	}
 
 	ret = splice_to_pipe(pipe, &spd);
-<<<<<<< HEAD
         /*
          * kernel patch
          * commit: 2c07f25ea7800adb36cd8da9b58c4ecd3fc3d064
          * https://android.googlesource.com/kernel/common/+/2c07f25ea7800adb36cd8da9b58c4ecd3fc3d064%5E!/#F0
          */
 	//splice_shrink_spd(pipe, &spd);
-=======
->>>>>>> 2c07f25... splice: fix racy pipe->buffers uses
 	splice_shrink_spd(&spd);
 out:
 	return ret;
@@ -4473,6 +4628,9 @@ static void tracing_init_debugfs_percpu(long cpu)
 
 	trace_create_file("stats", 0444, d_cpu,
 			(void *) cpu, &tracing_stats_fops);
+
+	trace_create_file("buffer_size_kb", 0444, d_cpu,
+			(void *) cpu, &tracing_entries_fops);
 }
 
 #ifdef CONFIG_FTRACE_SELFTEST
@@ -4843,7 +5001,7 @@ static __init int tracer_init_debugfs(void)
 			(void *) TRACE_PIPE_ALL_CPU, &tracing_pipe_fops);
 
 	trace_create_file("buffer_size_kb", 0644, d_tracer,
-			&global_trace, &tracing_entries_fops);
+			(void *) RING_BUFFER_ALL_CPUS, &tracing_entries_fops);
 
 	trace_create_file("buffer_total_size_kb", 0444, d_tracer,
 			&global_trace, &tracing_total_entries_fops);
@@ -4949,32 +5107,36 @@ void trace_init_global_iter(struct trace_iterator *iter)
 	iter->cpu_file = TRACE_PIPE_ALL_CPU;
 }
 
-void ftrace_dump(enum ftrace_dump_mode oops_dump_mode)
+static void
+__ftrace_dump(bool disable_tracing, enum ftrace_dump_mode oops_dump_mode)
 {
+	static arch_spinlock_t ftrace_dump_lock =
+		(arch_spinlock_t)__ARCH_SPIN_LOCK_UNLOCKED;
 	/* use static because iter can be a bit big for the stack */
 	static struct trace_iterator iter;
-	static atomic_t dump_running;
 	unsigned int old_userobj;
+	static int dump_ran;
 	unsigned long flags;
 	int cnt = 0, cpu;
 
-	/* Only allow one dump user at a time. */
-	if (atomic_inc_return(&dump_running) != 1) {
-		atomic_dec(&dump_running);
-		return;
-	}
+	/* only one dump */
+	local_irq_save(flags);
+	arch_spin_lock(&ftrace_dump_lock);
+	if (dump_ran)
+		goto out;
 
-	/*
-	 * Always turn off tracing when we dump.
-	 * We don't need to show trace output of what happens
-	 * between multiple crashes.
-	 *
-	 * If the user does a sysrq-z, then they can re-enable
-	 * tracing with echo 1 > tracing_on.
-	 */
+	dump_ran = 1;
+
 	tracing_off();
 
-	local_irq_save(flags);
+	/* Did function tracer already get disabled? */
+	if (ftrace_is_dead()) {
+		printk("# WARNING: FUNCTION TRACING IS CORRUPTED\n");
+		printk("#          MAY BE MISSING FUNCTION EVENTS\n");
+	}
+
+	if (disable_tracing)
+		ftrace_kill();
 
 	trace_init_global_iter(&iter);
 
@@ -5006,12 +5168,6 @@ void ftrace_dump(enum ftrace_dump_mode oops_dump_mode)
 	}
 
 	printk(KERN_TRACE "Dumping ftrace buffer:\n");
-
-	/* Did function tracer already get disabled? */
-	if (ftrace_is_dead()) {
-		printk("# WARNING: FUNCTION TRACING IS CORRUPTED\n");
-		printk("#          MAY BE MISSING FUNCTION EVENTS\n");
-	}
 
 	/*
 	 * We need to stop all tracing on all CPUS to read the
@@ -5052,13 +5208,25 @@ void ftrace_dump(enum ftrace_dump_mode oops_dump_mode)
 		printk(KERN_TRACE "---------------------------------\n");
 
  out_enable:
-	trace_flags |= old_userobj;
+	/* Re-enable tracing if requested */
+	if (!disable_tracing) {
+		trace_flags |= old_userobj;
 
-	for_each_tracing_cpu(cpu) {
-		atomic_dec(&iter.tr->data[cpu]->disabled);
+		for_each_tracing_cpu(cpu) {
+			atomic_dec(&iter.tr->data[cpu]->disabled);
+		}
+		tracing_on();
 	}
- 	atomic_dec(&dump_running);
+
+ out:
+	arch_spin_unlock(&ftrace_dump_lock);
 	local_irq_restore(flags);
+}
+
+/* By default: disable tracing after the dump */
+void ftrace_dump(enum ftrace_dump_mode oops_dump_mode)
+{
+	__ftrace_dump(true, oops_dump_mode);
 }
 EXPORT_SYMBOL_GPL(ftrace_dump);
 
@@ -5094,7 +5262,7 @@ __init static int tracer_alloc_buffers(void)
 		WARN_ON(1);
 		goto out_free_cpumask;
 	}
-	global_trace.entries = ring_buffer_size(global_trace.buffer);
+	//global_trace.entries = ring_buffer_size(global_trace.buffer);
 	if (global_trace.buffer_disabled)
 		tracing_off();
 
@@ -5107,7 +5275,6 @@ __init static int tracer_alloc_buffers(void)
 		ring_buffer_free(global_trace.buffer);
 		goto out_free_cpumask;
 	}
-	max_tr.entries = 1;
 #endif
 
 	/* Allocate the first page for all buffers */
@@ -5115,6 +5282,11 @@ __init static int tracer_alloc_buffers(void)
 		global_trace.data[i] = &per_cpu(global_trace_cpu, i);
 		max_tr.data[i] = &per_cpu(max_tr_data, i);
 	}
+
+	set_buffer_entries(&global_trace, ring_buf_size);
+#ifdef CONFIG_TRACER_MAX_TRACE
+	set_buffer_entries(&max_tr, 1);
+#endif
 
 	trace_init_cmdlines();
 
@@ -5192,50 +5364,7 @@ void inline mt_kernel_trace_end(){
 EXPORT_SYMBOL(mt_kernel_trace_end);
 #endif
 
-#ifdef CONFIG_MTK_SCHED_TRACERS
-/*Set default tracer*/
-__init static int tracer_late_init(void){
-#if 0
-    int err;
-    err = tracing_set_tracer("sched_switch");
-    if(err < 0)
-	printk("[ftrace] no sched_switch tracer\n");
-#endif
-
-    int err;
-    if((err = trace_set_clr_event("sched", "sched_switch", 1))){
-        printk("[ftrace] fail to enable sched_switch event\n");
-        return err;
-    }
-    if((err=trace_set_clr_event("sched", "sched_wakeup", 1))){
-        printk("[ftrace] fail to enable sched_wakeup event\n");
-        return err;
-    }
-    if((err=trace_set_clr_event("sched", "sched_wakeup_new", 1))){
-        printk("[ftrace] fail to enable sched_wakeup_new event\n");
-        return err;
-    }
-    if((err=trace_set_clr_event("irq", "irq_handler_entry", 1))){
-        printk("[ftrace] fail to enable irq_handler_entry event\n");
-        return err;
-    }
-    if((err=trace_set_clr_event("irq", "irq_handler_exit", 1))){
-        printk("[ftrace] fail to enable irq_handler_exit event\n");
-        return err;
-    }
-#ifdef CONFIG_SMP
-    if((err=trace_set_clr_event("sched", "sched_migrate_task", 1))){
-        printk("[ftrace] fail to enable sched_migrate_task event\n");
-        return err;
-    }
-#endif
-    return 0;
-}
-#endif
 
 early_initcall(tracer_alloc_buffers);
 fs_initcall(tracer_init_debugfs);
 late_initcall(clear_boot_tracer);
-#ifdef CONFIG_MTK_SCHED_TRACERS
-late_initcall(tracer_late_init);
-#endif
