@@ -373,7 +373,7 @@ static void lcm_get_params(LCM_PARAMS *params)
 		params->dsi.data_format.format      = LCM_DSI_FORMAT_RGB888;
 
 		params->dsi.PS=LCM_PACKED_PS_24BIT_RGB888;
-//		params->dsi.pll_select=1;	//0: MIPI_PLL; 1: LVDS_PLL
+		params->dsi.pll_select=1;	//0: MIPI_PLL; 1: LVDS_PLL
 		params->dsi.PLL_CLOCK = LCM_DSI_6589_PLL_CLOCK_221;//this value must be in MTK suggested table
 											//if not config this para, must config other 7 or 3 paras to gen. PLL
 

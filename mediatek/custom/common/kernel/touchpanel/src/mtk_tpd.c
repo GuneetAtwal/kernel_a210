@@ -24,8 +24,6 @@
 #include <linux/device.h>
 #include <linux/miscdevice.h>
 #include <asm/uaccess.h>
-//edit by Magnum 2013-3-27  CTP log control ...
-#include <linux/debugfs.h>
 
 // for magnify velocity********************************************
 #define TOUCH_IOC_MAGIC 'A'
@@ -35,101 +33,6 @@
 
 extern int tpd_v_magnify_x;
 extern int tpd_v_magnify_y;
-
-//edit by Magnum 2013-3-27  CTP log control ...
-size_t ctp_log_on = FALSE;//TRUE;
-void ctp_log_enable(int enable)
-{
-    	ctp_log_on = enable;
-	printk("[CTP] log %s\n", enable?"enabled":"disabled");
-}
-
-struct dentry *ctp_dbgfs = NULL;
-
-static char STR_HELP[] =
-    "\n"
-    "USAGE\n"
-    "        echo [ACTION]... > ctp_log\n"
-    "\n"
-    "ACTION\n"
-    "        ctplog:[on|off]\n"
-    "        enable ctp log\n"
-    "\n";
-static void process_ctp_opt(const char *opt)
-{
-    if (0 == strncmp(opt, "ctplog:", 7))
-    {
-        if (0 == strncmp(opt + 7, "on", 2)) {
-            ctp_log_enable(true);
-        } else if (0 == strncmp(opt + 7, "off", 3)) {
-            ctp_log_enable(false);
-        } else {
-            goto Error;
-        }
-    }
-
-	return;
-	Error:
-    printk("[CTP]  parse command error!\n");
-}
-
-static void process_ctp_cmd(char *cmd)
-{
-    char *tok;
-    
-    printk("[CTP] %s\n", cmd);
-    
-    while ((tok = strsep(&cmd, " ")) != NULL)
-    {
-        process_ctp_opt(tok);
-    }
-}
-
-static ssize_t ctp_debug_open(struct inode *inode, struct file *file)
-{
-    file->private_data = inode->i_private;
-    return 0;
-}
-
-static char ctp_debug_buffer[2048];
-
-static ssize_t ctp_debug_read(struct file *file,char __user *ubuf, size_t count, loff_t *ppos)
-{
-	const int ctp_debug_bufmax = sizeof(ctp_debug_buffer) - 1;
-	int n = 0;
-
-	n += scnprintf(ctp_debug_buffer + n, ctp_debug_bufmax - n, STR_HELP);
-	ctp_debug_buffer[n++] = 0;
-
-	return simple_read_from_buffer(ubuf, count, ppos, ctp_debug_buffer, n);
-}
-
-static ssize_t ctp_debug_write(struct file *file, const char __user *ubuf, size_t count, loff_t *ppos)
-{
-        const int ctp_debug_bufmax = sizeof(ctp_debug_buffer) - 1;
-	size_t ret;
-
-	ret = count;
-
-	if (count > ctp_debug_bufmax) 
-        count =ctp_debug_bufmax;
-
-	if (copy_from_user(&ctp_debug_buffer, ubuf, count))
-		return -EFAULT;
-	printk("[CTP] ctp_debug_buffer count ==%d \n",count);
-	ctp_debug_buffer[count] = 0;
-	printk("[CTP] ctp_debug_buffer ==%s \n",ctp_debug_buffer);
-    	process_ctp_cmd(ctp_debug_buffer);
-
-    return ret;
-}
-
-
-static struct file_operations ctp_debug_fops = {
-	.read  = ctp_debug_read,
-    	.write = ctp_debug_write,
-	.open  = ctp_debug_open,
-};
 
 static int tpd_misc_open(struct inode *inode, struct file *file)
 {
@@ -246,11 +149,6 @@ int tpd_register_flag=0;
 struct tpd_device  *tpd = 0;
 static struct tpd_driver_t tpd_driver_list[TP_DRV_MAX_COUNT] ;//= {0};
 
-//Ivan added gobel flag to all TP module
-//Ivan added
-int tp_boot_mode = 0;
-int key_event_flag=0;
-
 static struct platform_driver tpd_driver = {
     .remove     = tpd_remove,
     .shutdown   = NULL,
@@ -298,9 +196,11 @@ int tpd_driver_add(struct tpd_driver_t *tpd_drv)
 			tpd_driver_list[0].suspend = tpd_drv->suspend;
 			tpd_driver_list[0].resume = tpd_drv->resume;
 			tpd_driver_list[0].tpd_have_button = tpd_drv->tpd_have_button;
-			tpd_driver_list[0].tpd_x_res = tpd_drv->tpd_x_res;
-			tpd_driver_list[0].tpd_y_res = tpd_drv->tpd_y_res;
+            
+            //LINE<JIRA_ID><DATE20130422><add multi tp>zenghaihui
             tpd_driver_list[0].tpd_get_fw_version = NULL;
+            tpd_driver_list[0].tpd_get_fw_vendor_name = NULL;
+            
 			return 0;
 	}
 	for(i = 1; i < TP_DRV_MAX_COUNT; i++)
@@ -313,11 +213,11 @@ int tpd_driver_add(struct tpd_driver_t *tpd_drv)
 			tpd_driver_list[i].suspend = tpd_drv->suspend;
 			tpd_driver_list[i].resume = tpd_drv->resume;
 			tpd_driver_list[i].tpd_have_button = tpd_drv->tpd_have_button;
-			tpd_driver_list[i].tpd_x_res = tpd_drv->tpd_x_res;
-			tpd_driver_list[i].tpd_y_res = tpd_drv->tpd_y_res;
-            tpd_driver_list[i].tpd_get_fw_version = tpd_drv->tpd_get_fw_version;
-			//edit by Magnum 2012-7-10
-			 tpd_driver_list[i].tpd_get_vendor_version= tpd_drv->tpd_get_vendor_version;
+            
+            //LINE<JIRA_ID><DATE20130422><add multi tp>zenghaihui
+            tpd_driver_list[i].tpd_get_fw_version = tpd_drv->tpd_get_fw_version;;
+            tpd_driver_list[i].tpd_get_fw_vendor_name = tpd_drv->tpd_get_fw_vendor_name;;
+            
 			#if 0
 			if(tpd_drv->tpd_local_init()==0)
 			{
@@ -356,67 +256,56 @@ int tpd_driver_remove(struct tpd_driver_t *tpd_drv)
 	return 0;
 }
 
-//edit by Magnum 2012-7-10 add ctp vendor-id attr
-static ssize_t tpd_vendor_version_show(struct device *dev, 
-		struct device_attribute *attr, char *buf)
+#if 1 // defined (TINNO_ANDROID_S8121) || (TINNO_ANDROID_S9091)
+char tpd_desc[50];
+int tpd_fw_version = 0;
+extern int get_fw_version_ext(void);
+static ssize_t tpd_fw_version_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
 {
-    int vendor = 0;
-    if(g_tpd_drv && g_tpd_drv->tpd_get_vendor_version ){
-        vendor = g_tpd_drv->tpd_get_vendor_version();
-    }
-    return snprintf(buf, PAGE_SIZE, "%x\n", vendor);
-}
-
-static DEVICE_ATTR(vendor_version, S_IRUGO, tpd_vendor_version_show, NULL);
-
-static ssize_t tpd_fw_version_show(struct device *dev, 
-		struct device_attribute *attr, char *buf)
-{
-    int version = 0;
-    if(g_tpd_drv && g_tpd_drv->tpd_get_fw_version ){
-        version = g_tpd_drv->tpd_get_fw_version();
-    }
-    return snprintf(buf, PAGE_SIZE, "%x\n", version);
-}
-
-static DEVICE_ATTR(panel_version, S_IRUGO, tpd_fw_version_show, NULL);
-
-static ssize_t tpd_device_name_show(struct device *dev, 
-		struct device_attribute *attr, char *buf)
-{
-    if (g_tpd_drv && g_tpd_drv->tpd_device_name) {
-        return snprintf(buf, PAGE_SIZE, "%s\n", g_tpd_drv->tpd_device_name);
+    if( g_tpd_drv && g_tpd_drv->tpd_get_fw_version )
+    {
+        return sprintf(buf, "%x", g_tpd_drv->tpd_get_fw_version());
     }
 
     return 0;
+
 }
-static DEVICE_ATTR(device_name, S_IRUGO, tpd_device_name_show, NULL);
-char phonestate=0;
-/******************************************************************************/
-static ssize_t ft5x06_show_phone_state(struct device* dev, 
-                                 struct device_attribute *attr, char *buf)
+static DEVICE_ATTR(tpd_fw_version, 0444, tpd_fw_version_show, NULL);
+
+static ssize_t tpd_fw_vendor_info_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
 {
-    printk("ft5x06_show_phone_state phonestate=%d\n",phonestate);
-    return snprintf(buf, PAGE_SIZE, "%d\n", phonestate);
+    char  vl_fw_vendor_name[256] ={ 0};
+
+    if( g_tpd_drv && g_tpd_drv->tpd_get_fw_vendor_name )
+    {
+        g_tpd_drv->tpd_get_fw_vendor_name(vl_fw_vendor_name);
+    }
+
+    return sprintf(buf, "%s", vl_fw_vendor_name);
+
 }
-/******************************************************************************/
-static ssize_t ft5x06_store_phone_state(struct device* dev, struct device_attribute *attr,
-                                  const char *buf, size_t count)
+static DEVICE_ATTR(tpd_fw_vendor_info, 0444, tpd_fw_vendor_info_show, NULL);
+
+
+static ssize_t tpd_fw_chip_info_show(struct device *dev,
+					struct device_attribute *attr,
+					char *buf)
 {
-    phonestate=buf[0];
-    printk("ft5x06_store_phone_state phonestate=%d,buf=%d\n",phonestate,buf[0]);
-    return 1;
+    if( g_tpd_drv )
+    {
+	return sprintf(buf, "%s", g_tpd_drv->tpd_device_name);
+    }
+
+    return 0;
+    
 }
-/******************************************************************************/
-DEVICE_ATTR(phone_state,     S_IWUSR | S_IWGRP | S_IRUGO, ft5x06_show_phone_state,  ft5x06_store_phone_state);
-void tpd_create_attr_file(void)
-{
-    /* register the attributes */
-     printk("tpd_create_attr_file \n");
-     if (device_create_file(&tpd->dev->dev, &dev_attr_phone_state)){
-             printk("Register the attributes panel version is failed.");
-     }
-} 
+static DEVICE_ATTR(tpd_fw_chip_info, 0444, tpd_fw_chip_info_show, NULL);
+#endif
+
 /* touch panel probe */
 static int tpd_probe(struct platform_device *pdev) {
 		int  touch_type = 1; // 0:R-touch, 1: Cap-touch
@@ -451,8 +340,6 @@ static int tpd_probe(struct platform_device *pdev) {
     /* allocate input device */
     if((tpd->dev=input_allocate_device())==NULL) { kfree(tpd); return -ENOMEM; }
   
-//Ivan move to lower part of this function
-/*
     TPD_RES_X = simple_strtoul(LCM_WIDTH, NULL, 0);
     TPD_RES_Y = simple_strtoul(LCM_HEIGHT, NULL, 0);
   
@@ -463,8 +350,6 @@ static int tpd_probe(struct platform_device *pdev) {
     tpd_mode_min = TPD_RES_Y/2;
     tpd_mode_max = TPD_RES_Y;
     tpd_mode_keypad_tolerance = TPD_RES_X*TPD_RES_X/1600;
-*/
-
     /* struct input_dev dev initialization and registration */
     tpd->dev->name = TPD_DEVICE;
     set_bit(EV_ABS, tpd->dev->evbit);
@@ -507,24 +392,16 @@ static int tpd_probe(struct platform_device *pdev) {
     register_early_suspend(&MTK_TS_early_suspend_handler);
     #endif		  
 #endif	  
-//Ivan <<
-    TPD_RES_X = g_tpd_drv->tpd_x_res;
-    TPD_RES_Y = g_tpd_drv->tpd_y_res;
-
-    printk("mtk_tpd: TPD_RES_X = %d, TPD_RES_Y = %d\n", TPD_RES_X, TPD_RES_Y);
-
-    tpd_mode = TPD_MODE_NORMAL;
-    tpd_mode_axis = 0;
-    tpd_mode_min = TPD_RES_Y/2;
-    tpd_mode_max = TPD_RES_Y;
-    tpd_mode_keypad_tolerance = TPD_RES_X*TPD_RES_X/1600;
-//Ivan >>
-
 //#ifdef TPD_TYPE_CAPACITIVE
 		/* TPD_TYPE_CAPACITIVE handle */
 		if(touch_type == 1){
-			
-//Ivan		set_bit(ABS_MT_TRACKING_ID, tpd->dev->absbit);
+#if 0 // defined (TINNO_ANDROID_S8121) || (TINNO_ANDROID_S9091)
+		set_bit(ABS_MT_PRESSURE, tpd->dev->absbit);
+		set_bit(ABS_MT_WIDTH_MAJOR, tpd->dev->absbit);
+		set_bit(ABS_MT_WIDTH_MINOR, tpd->dev->absbit);
+		set_bit(ABS_MT_TOUCH_MINOR, tpd->dev->absbit);
+#endif
+		set_bit(ABS_MT_TRACKING_ID, tpd->dev->absbit);
     	set_bit(ABS_MT_TOUCH_MAJOR, tpd->dev->absbit);
     	set_bit(ABS_MT_TOUCH_MINOR, tpd->dev->absbit);
     	set_bit(ABS_MT_POSITION_X, tpd->dev->absbit);
@@ -539,8 +416,16 @@ static int tpd_probe(struct platform_device *pdev) {
 #else
 		input_set_abs_params(tpd->dev, ABS_MT_POSITION_X, 0, TPD_RES_X, 0, 0);
 		input_set_abs_params(tpd->dev, ABS_MT_POSITION_Y, 0, TPD_RES_Y, 0, 0);
+#if 0 // defined (TINNO_ANDROID_S8121) || (TINNO_ANDROID_S9091)
+		input_set_abs_params(tpd->dev, ABS_MT_TOUCH_MAJOR, 0, 112, 0, 0);
+		input_set_abs_params(tpd->dev, ABS_MT_TOUCH_MINOR, 0, 112, 0, 0); 	
+		input_set_abs_params(tpd->dev, ABS_MT_WIDTH_MAJOR, 0, 112, 0, 0);
+		input_set_abs_params(tpd->dev, ABS_MT_WIDTH_MINOR, 0, 112, 0, 0);
+		input_set_abs_params(tpd->dev, ABS_MT_PRESSURE, 0, 112, 0, 0); 	
+#else
 		input_set_abs_params(tpd->dev, ABS_MT_TOUCH_MAJOR, 0, 100, 0, 0);
 		input_set_abs_params(tpd->dev, ABS_MT_TOUCH_MINOR, 0, 100, 0, 0); 	
+#endif
 #endif
     	TPD_DMESG("Cap touch panel driver\n");
   	}
@@ -563,10 +448,8 @@ static int tpd_probe(struct platform_device *pdev) {
     #endif
     if(input_register_device(tpd->dev))
         TPD_DMESG("input_register_device failed.(tpd)\n");
-    else {
+    else
 			tpd_register_flag = 1;
-			TPD_DMESG("input_register_device succeed!!\n");
-		}
     /* init R-Touch */
     #if 0
 	  if(touch_type == 0) 
@@ -578,24 +461,32 @@ static int tpd_probe(struct platform_device *pdev) {
     {
     	tpd_button_init();
     }
-	
-    device_create_file(&tpd->dev->dev, &dev_attr_panel_version);
-    device_create_file(&tpd->dev->dev, &dev_attr_device_name);
-	//edit by Magnum 2012-7-10
-	device_create_file(&tpd->dev->dev, &dev_attr_vendor_version);
-	ctp_dbgfs = debugfs_create_file("ctp_log",
-        S_IFREG|S_IRUGO, NULL, (void *)0, &ctp_debug_fops);
-    tpd_create_attr_file();
+#if 1 // defined (TINNO_ANDROID_S8121) || (TINNO_ANDROID_S9091)
+	if(device_create_file(&pdev->dev, &dev_attr_tpd_fw_version)) {
+		TPD_DMESG("create fw_version file error--Liu\n");
+	}
+	if(device_create_file(&pdev->dev, &dev_attr_tpd_fw_vendor_info)) {
+		TPD_DMESG("create touch_info file error--Liu\n");
+	}
+	if(device_create_file(&pdev->dev, &dev_attr_tpd_fw_chip_info)) {
+		TPD_DMESG("create touch_info file error--Liu\n");
+	}
+#endif
     return 0;
 }
 
 static int tpd_remove(struct platform_device *pdev)
 {
-    device_remove_file(&tpd->dev->dev, &dev_attr_device_name);
-    device_remove_file(&tpd->dev->dev, &dev_attr_panel_version);
-    //edit by Magnum 2012-7-10
-    device_create_file(&tpd->dev->dev, &dev_attr_vendor_version);
-    debugfs_remove(ctp_dbgfs);
+#if 1 // defined (TINNO_ANDROID_S8121) || (TINNO_ANDROID_S9091)
+
+    device_remove_file(&pdev->dev, &dev_attr_tpd_fw_chip_info);
+
+    device_remove_file(&pdev->dev, &dev_attr_tpd_fw_vendor_info);
+
+    device_remove_file(&pdev->dev, &dev_attr_tpd_fw_version);
+
+#endif
+    
 	   input_unregister_device(tpd->dev);
     #ifdef CONFIG_HAS_EARLYSUSPEND
     unregister_early_suspend(&MTK_TS_early_suspend_handler);

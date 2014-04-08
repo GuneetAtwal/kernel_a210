@@ -104,6 +104,10 @@ static struct i2c_board_info __initdata i2c_kxtj2_1009={ I2C_BOARD_INFO(KXTJ2_10
 static int kxtj2_1009_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id); 
 static int kxtj2_1009_i2c_remove(struct i2c_client *client);
 static int kxtj2_1009_i2c_detect(struct i2c_client *client, int kind, struct i2c_board_info *info);
+static int  kxtj2_local_init(void);
+static int  kxtj2_remove(void);
+
+static int kxtj2_init_flag =0; // 0<==>OK -1 <==> fail
 
 /*----------------------------------------------------------------------------*/
 typedef enum {
@@ -132,6 +136,12 @@ struct data_filter {
     int num;
     int idx;
 };
+static struct sensor_init_info kxtj2_init_info = {
+		.name = "kxtj2",
+		.init = kxtj2_local_init,
+		.uninit = kxtj2_remove,
+	
+};
 /*----------------------------------------------------------------------------*/
 struct kxtj2_1009_i2c_data {
     struct i2c_client *client;
@@ -141,6 +151,7 @@ struct kxtj2_1009_i2c_data {
     /*misc*/
     struct data_resolution *reso;
     atomic_t                trace;
+    atomic_t                no_early_suspend; // Jiangde Gestrure ++
     atomic_t                suspend;
     atomic_t                selftest;
 	atomic_t				filter;
@@ -179,11 +190,16 @@ static struct i2c_driver kxtj2_1009_i2c_driver = {
 
 /*----------------------------------------------------------------------------*/
 static struct i2c_client *kxtj2_1009_i2c_client = NULL;
-static struct platform_driver kxtj2_1009_gsensor_driver;
+//static struct platform_driver kxtj2_1009_gsensor_driver;
 static struct kxtj2_1009_i2c_data *obj_i2c_data = NULL;
 static bool sensor_power = true;
+static int sensor_suspend = 0;
+static bool s_g_stop_early_suspend = FALSE; // Jiangde Gesture ++
+
 static GSENSOR_VECTOR3D gsensor_gain;
 static char selftestRes[8]= {0}; 
+static DEFINE_MUTEX(kxtj2_1009_mutex);
+static bool enable_status = false;
 
 
 /*----------------------------------------------------------------------------*/
@@ -231,6 +247,44 @@ static void KXTJ2_1009_power(struct acc_hw *hw, unsigned int on)
 }
 /*----------------------------------------------------------------------------*/
 
+//begin add by lishengli 20130405
+/*----------------------------------------------------------------------------*/
+static int KXTJ2_1009_i2c_read_block(struct i2c_client *client, u8 addr, u8 *data, u8 len)
+{
+        u8 beg = addr;
+	struct i2c_msg msgs[2] = {
+		{
+			.addr = client->addr,	.flags = 0,
+			.len = 1,	.buf = &beg
+		},
+		{
+			.addr = client->addr,	.flags = I2C_M_RD,
+			.len = len,	.buf = data,
+		}
+	};
+	int err;
+
+	if (!client)
+		return -EINVAL;
+	else if (len > C_I2C_FIFO_SIZE) {
+		GSE_ERR(" length %d exceeds %d\n", len, C_I2C_FIFO_SIZE);
+		return -EINVAL;
+	}
+
+	err = i2c_transfer(client->adapter, msgs, sizeof(msgs)/sizeof(msgs[0]));
+	if (err != 2) {
+		GSE_ERR("i2c_transfer error: (%d %p %d) %d\n",
+			addr, data, len, err);
+		err = -EIO;
+	} else {
+		err = 0;
+	}
+	return err;
+
+}
+//end add by lishengli 20130405
+
+
 /*----------------------------------------------------------------------------*/
 static int KXTJ2_1009_SetDataResolution(struct kxtj2_1009_i2c_data *obj)
 {
@@ -239,7 +293,9 @@ static int KXTJ2_1009_SetDataResolution(struct kxtj2_1009_i2c_data *obj)
 
 	KXTJ2_1009_SetPowerMode(obj->client, false);
 
-	if(hwmsen_read_block(obj->client, KXTJ2_1009_REG_DATA_RESOLUTION, databuf, 0x01))
+	//begin add by lishengli 20130405
+	//if(hwmsen_read_block(obj->client, KXTJ2_1009_REG_DATA_RESOLUTION, databuf, 0x01))
+	if(KXTJ2_1009_i2c_read_block(obj->client, KXTJ2_1009_REG_DATA_RESOLUTION, databuf, 0x01))	
 	{
 		printk("kxtj2_1009 read Dataformat failt \n");
 		return KXTJ2_1009_ERR_I2C;
@@ -282,7 +338,7 @@ static int KXTJ2_1009_ReadData(struct i2c_client *client, s16 data[KXTJ2_1009_AX
 	{
 		err = -EINVAL;
 	}
-	else if(err = hwmsen_read_block(client, addr, buf, 0x06))
+	else if(err = KXTJ2_1009_i2c_read_block(client, addr, buf, 0x06))	//begin add by lishengli 20130405
 	{
 		GSE_ERR("error: %d\n", err);
 	}
@@ -498,7 +554,7 @@ static int KXTJ2_1009_WriteCalibration(struct i2c_client *client, int dat[KXTJ2_
 		return err;
 	}
 #endif
-
+	mdelay(1);
 	return err;
 }
 /*----------------------------------------------------------------------------*/
@@ -541,7 +597,7 @@ static int KXTJ2_1009_CheckDeviceID(struct i2c_client *client)
 	{
 		return KXTJ2_1009_ERR_I2C;
 	}
-	
+	mdelay(1);
 	return KXTJ2_1009_SUCCESS;
 }
 /*----------------------------------------------------------------------------*/
@@ -559,13 +615,13 @@ static int KXTJ2_1009_SetPowerMode(struct i2c_client *client, bool enable)
 		return KXTJ2_1009_SUCCESS;
 	}
 
-	if(hwmsen_read_block(client, addr, databuf, 0x01))
+	if(KXTJ2_1009_i2c_read_block(client, addr, databuf, 0x01))		//begin add by lishengli 20130405
 	{
 		GSE_ERR("read power ctl register err!\n");
 		return KXTJ2_1009_ERR_I2C;
 	}
-
-	
+	GSE_LOG("set power mode value = 0x%x!\n",databuf[0]);
+	mdelay(1);
 	if(enable == TRUE)
 	{
 		databuf[0] |= KXTJ2_1009_MEASURE_MODE;
@@ -606,12 +662,12 @@ static int KXTJ2_1009_SetDataFormat(struct i2c_client *client, u8 dataformat)
 
 	KXTJ2_1009_SetPowerMode(client, false);
 
-	if(hwmsen_read_block(client, KXTJ2_1009_REG_DATA_FORMAT, databuf, 0x01))
+	if(KXTJ2_1009_i2c_read_block(client, KXTJ2_1009_REG_DATA_FORMAT, databuf, 0x01))		//begin add by lishengli 20130405
 	{
 		printk("kxtj2_1009 read Dataformat failt \n");
 		return KXTJ2_1009_ERR_I2C;
 	}
-
+	mdelay(1);
 	databuf[0] &= ~KXTJ2_1009_RANGE_MASK;
 	databuf[0] |= dataformat;
 	databuf[1] = databuf[0];
@@ -629,7 +685,7 @@ static int KXTJ2_1009_SetDataFormat(struct i2c_client *client, u8 dataformat)
 	
 	printk("KXTJ2_1009_SetDataFormat OK! \n");
 	
-
+	mdelay(1);
 	return KXTJ2_1009_SetDataResolution(obj);    
 }
 /*----------------------------------------------------------------------------*/
@@ -643,12 +699,12 @@ static int KXTJ2_1009_SetBWRate(struct i2c_client *client, u8 bwrate)
 	
 	KXTJ2_1009_SetPowerMode(client, false);
 
-	if(hwmsen_read_block(client, KXTJ2_1009_REG_BW_RATE, databuf, 0x01))
+	if(KXTJ2_1009_i2c_read_block(client, KXTJ2_1009_REG_BW_RATE, databuf, 0x01))		//begin add by lishengli 20130405
 	{
 		printk("kxtj2_1009 read rate failt \n");
 		return KXTJ2_1009_ERR_I2C;
 	}
-
+	mdelay(1);
 	databuf[0] &= 0xf0;
 	databuf[0] |= bwrate;
 	databuf[1] = databuf[0];
@@ -661,7 +717,7 @@ static int KXTJ2_1009_SetBWRate(struct i2c_client *client, u8 bwrate)
 	{
 		return KXTJ2_1009_ERR_I2C;
 	}
-
+	mdelay(1);
 	
 	KXTJ2_1009_SetPowerMode(client, true);
 	printk("KXTJ2_1009_SetBWRate OK! \n");
@@ -685,6 +741,7 @@ static int KXTJ2_1009_SetIntEnable(struct i2c_client *client, u8 intenable)
 		return KXTJ2_1009_ERR_I2C;
 	}
 	
+			mdelay(1);
 	return KXTJ2_1009_SUCCESS;    
 }
 /*----------------------------------------------------------------------------*/
@@ -699,7 +756,7 @@ static int kxtj2_1009_init_client(struct i2c_client *client, int reset_cali)
 		return res;
 	}	
 
-	res = KXTJ2_1009_SetPowerMode(client, false);
+	res = KXTJ2_1009_SetPowerMode(client, enable_status);//false);//
 	if(res != KXTJ2_1009_SUCCESS)
 	{
 		return res;
@@ -782,7 +839,21 @@ static int KXTJ2_1009_ReadSensorData(struct i2c_client *client, char *buf, int b
 		*buf = 0;
 		return -2;
 	}
-
+	if(sensor_suspend == 1)
+	{
+		if (NULL != obj_i2c_data && 0 != atomic_read(&obj_i2c_data->no_early_suspend) ) // Jiangde Gesture ++
+		{
+            GSE_ERR("Jiangde sensor_suspend = 1, but read data, cos no_early_suspend = %d \n",
+                     atomic_read(&obj_i2c_data->no_early_suspend));
+		}
+        else 
+        {
+    		//GSE_LOG("sensor in suspend read not data!\n");
+    		return 0;
+        }
+	}
+	#if 0 //wrong operation marked
+	mutex_lock(&kxtj2_1009_mutex);
 	if(sensor_power == FALSE)
 	{
 		res = KXTJ2_1009_SetPowerMode(client, true);
@@ -791,7 +862,8 @@ static int KXTJ2_1009_ReadSensorData(struct i2c_client *client, char *buf, int b
 			GSE_ERR("Power on kxtj2_1009 error %d!\n", res);
 		}
 	}
-
+	mutex_unlock(&kxtj2_1009_mutex);	
+	#endif
 	if(res = KXTJ2_1009_ReadData(client, obj->data))
 	{        
 		GSE_ERR("I2C error: ret value=%d", res);
@@ -1317,12 +1389,23 @@ static ssize_t show_status_value(struct device_driver *ddri, char *buf)
 /*----------------------------------------------------------------------------*/
 static ssize_t show_power_status_value(struct device_driver *ddri, char *buf)
 {
+	
+	u8 databuf[2];    
+	int res = 0;
+	u8 addr = KXTJ2_1009_REG_POWER_CTL;
+	struct kxtj2_1009_i2c_data *obj = obj_i2c_data;
+	if(KXTJ2_1009_i2c_read_block(obj->client, addr, databuf, 0x01))
+	{
+		GSE_ERR("read power ctl register err!\n");
+		return 1;
+	}
+	
 	if(sensor_power)
-		printk("G sensor is in work mode, sensor_power = %d\n", sensor_power);
+		GSE_LOG("G sensor is in work mode, sensor_power = %d\n", sensor_power);
 	else
-		printk("G sensor is in standby mode, sensor_power = %d\n", sensor_power);
+		GSE_LOG("G sensor is in standby mode, sensor_power = %d\n", sensor_power);
 
-	return 0;
+	return snprintf(buf, PAGE_SIZE, "%x\n", databuf[0]);
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1403,7 +1486,7 @@ static ssize_t show_register_value(struct device_driver *ddri, char *buf)
 			return 0;
 		}
 		
-		if(hwmsen_read_block(obj->client, i2c_dev_reg, databuf, 0x01))
+		if(KXTJ2_1009_i2c_read_block(obj->client, i2c_dev_reg, databuf, 0x01))		//begin add by lishengli 20130405
 		{
 			GSE_ERR("read power ctl register err!\n");
 			return KXTJ2_1009_ERR_I2C;
@@ -1420,6 +1503,150 @@ static DRIVER_ATTR(i2c,      S_IWUSR | S_IRUGO, show_register_value,         sto
 static DRIVER_ATTR(register,      S_IWUSR | S_IRUGO, show_register,         store_register);
 
 
+// Jiangde Gestrure BEGIN, see GesturePhoneService.java for more information!
+/*----------------------------------------------------------------------------*/
+static ssize_t show_no_early_value(struct device_driver *ddri, char *buf) // Jiangde ++
+{
+	ssize_t res;
+	struct kxtj2_1009_i2c_data *obj = obj_i2c_data;
+	if (obj == NULL)
+	{
+		GSE_ERR("Jiangde i2c_data obj is null!!\n");
+		return 0;
+	}
+	
+	GSE_ERR("Jiangde show_no_early_value, no_early_suspend = %d \n", atomic_read(&obj->no_early_suspend));
+	res = snprintf(buf, PAGE_SIZE, "0x%04X\n", atomic_read(&obj->no_early_suspend));     
+	return res;    
+}
+/*----------------------------------------------------------------------------*/
+static ssize_t store_no_early_value(struct device_driver *ddri, const char *buf, size_t count) // Jiangde ++
+{
+	struct kxtj2_1009_i2c_data *obj = obj_i2c_data;
+	int no_early_suspend;
+	if (obj == NULL)
+	{
+		GSE_ERR("Jiangde i2c_data obj is null!!\n");
+		return 0;
+	}
+	
+	if(1 == sscanf(buf, "%d", &no_early_suspend))
+	{
+		GSE_ERR("Jiangde store_no_early_value, sensor_suspend=%d, no_early_suspend=%d, count=%d, buf=%s \n",
+			    sensor_suspend, no_early_suspend, count, buf);
+        
+		atomic_set(&obj->no_early_suspend, no_early_suspend);
+
+        if (1 == sensor_suspend)
+        {
+            u8 databuf[2]; //for debug read power control register to see the value is OK
+            
+            GSE_ERR("Jiangde sensor_suspend = 1, s_g_stop_early_suspend = %d, no_early_suspend = %d \n",
+                     s_g_stop_early_suspend , no_early_suspend);
+
+            // Open
+            if (FALSE == s_g_stop_early_suspend
+                && 1 == no_early_suspend)
+            {
+                GSE_ERR("Jiangde KXTJ2_1009_power(obj->hw, 1); \n");
+                KXTJ2_1009_power(obj->hw, 1);
+                
+                atomic_set(&obj->suspend, 0);
+            	mutex_lock(&kxtj2_1009_mutex);
+                do {
+                	if(KXTJ2_1009_i2c_read_block(obj->client, KXTJ2_1009_REG_POWER_CTL, databuf, 0x01))
+                	{
+                		GSE_ERR("Jiangde read power ctl register err!\n");
+                		break;
+                	}
+                    
+                	if(databuf[0]==0xff)//if the value is ff the gsensor will not work anymore, any i2c operations won't be vaild
+                	{
+                        GSE_ERR("Jiangde before KXTJ2_1009_SetPowerMode databuf = 0x%x\n",databuf[0]);
+                	}
+                    
+                    GSE_ERR("Jiangde kxtj2_1009_init_client(obj->client, true) \n");
+                    if(kxtj2_1009_init_client(obj->client, 0))
+                    {
+                        GSE_ERR("Jiangde initialize client fail!!\n");
+                        break;        
+                    }
+                    
+                    GSE_ERR("Jiangde KXTJ2_1009_SetPowerMode(obj->client, true) \n");
+                	if(KXTJ2_1009_SetPowerMode(obj->client, true))
+                	{
+                		GSE_ERR("Jiangde write power control fail!!\n");
+                		break;
+                	} 
+                	
+                	if(KXTJ2_1009_i2c_read_block(obj->client, KXTJ2_1009_REG_POWER_CTL, databuf, 0x01)) //for debug read power control register to see the value is OK
+                	{
+                		GSE_ERR("Jiangde read power ctl register err!\n");
+                		break;
+                	}
+                    
+                	if(databuf[0]==0xff)//if the value is ff the gsensor will not work anymore, any i2c operations won't be vaild
+                	{
+                        GSE_ERR("Jiangde after KXTJ2_1009_SetPowerMode databuf = 0x%x\n",databuf[0]);
+                	}
+                } while(0);
+                mutex_unlock(&kxtj2_1009_mutex); 
+            }
+
+            // Close
+            if (TRUE == s_g_stop_early_suspend
+                && 0 == no_early_suspend)
+            {
+                atomic_set(&obj->suspend, 1); 
+            	mutex_lock(&kxtj2_1009_mutex);
+                do  {
+                    if(KXTJ2_1009_i2c_read_block(obj->client, KXTJ2_1009_REG_POWER_CTL, databuf, 0x01))
+                	{
+                		GSE_ERR("Jiangde read power ctl register err!\n");
+                		break;
+                	}
+                    
+                	if(databuf[0]==0xff)//if the value is ff the gsensor will not work anymore, any i2c operations won't be vaild
+                	{
+                        GSE_ERR("Jiangde before KXTJ2_1009_SetPowerMode in suspend databuf = 0x%x\n",databuf[0]);
+                	}
+                    
+                    GSE_ERR("Jiangde KXTJ2_1009_SetPowerMode(obj->client, false) \n");
+                	if(KXTJ2_1009_SetPowerMode(obj->client, false))
+                	{
+                		GSE_ERR("Jiangde write power control fail!!\n");
+                		break;
+                	}
+                    
+                	if(KXTJ2_1009_i2c_read_block(obj->client, KXTJ2_1009_REG_POWER_CTL, databuf, 0x01)) //for debug read power control register to see the value is OK
+                	{
+                		GSE_ERR("Jiangde read power ctl register err!\n");
+                		break;
+                	}
+                    
+                	if(databuf[0]==0xff)//if the value is ff the gsensor will not work anymore, any i2c operations won't be vaild
+                	{
+                        GSE_ERR("Jiangde after KXTJ2_1009_SetPowerMode suspend err databuf = 0x%x\n",databuf[0]);
+                	}
+                    
+                    GSE_ERR("Jiangde KXTJ2_1009_power(obj->hw, 0); \n");
+                	KXTJ2_1009_power(obj->hw, 0);                
+                } while(0);
+                mutex_unlock(&kxtj2_1009_mutex);
+            }      
+        }        
+
+	}	
+	else
+	{
+		GSE_ERR("Jiangde store_no_early_value, length = %d, invalid content = %s\n", count, buf);
+	}
+	
+	return count;    
+}
+// Jiangde Gestrure END
+static DRIVER_ATTR(noearly,     S_IWUSR | S_IRUGO, show_no_early_value,      store_no_early_value); // Jiangde ++
+
 /*----------------------------------------------------------------------------*/
 static struct driver_attribute *kxtj2_1009_attr_list[] = {
 	&driver_attr_chipinfo,     /*chip information*/
@@ -1433,6 +1660,7 @@ static struct driver_attribute *kxtj2_1009_attr_list[] = {
 	&driver_attr_powerstatus,
 	&driver_attr_register,
 	&driver_attr_i2c,
+	&driver_attr_noearly,      /* no early suspend, Jiangde Gestrure ++*/
 };
 /*----------------------------------------------------------------------------*/
 static int kxtj2_1009_create_attr(struct device_driver *driver) 
@@ -1476,7 +1704,7 @@ static int kxtj2_1009_delete_attr(struct device_driver *driver)
 }
 
 /*----------------------------------------------------------------------------*/
-int gsensor_operate(void* self, uint32_t command, void* buff_in, int size_in,
+int kxtj2_operate(void* self, uint32_t command, void* buff_in, int size_in,
 		void* buff_out, int size_out, int* actualout)
 {
 	int err = 0;
@@ -1509,13 +1737,13 @@ int gsensor_operate(void* self, uint32_t command, void* buff_in, int size_in,
 				{
 					sample_delay = KXTJ2_1009_BW_50HZ;
 				}
-				
+				mutex_lock(&kxtj2_1009_mutex);
 				err = KXTJ2_1009_SetBWRate(priv->client, sample_delay);
 				if(err != KXTJ2_1009_SUCCESS ) //0x2C->BW=100Hz
 				{
 					GSE_ERR("Set delay parameter error!\n");
 				}
-
+				mutex_unlock(&kxtj2_1009_mutex);
 				if(value >= 50)
 				{
 					atomic_set(&priv->filter, 0);
@@ -1543,14 +1771,25 @@ int gsensor_operate(void* self, uint32_t command, void* buff_in, int size_in,
 			else
 			{
 				value = *(int *)buff_in;
+				mutex_lock(&kxtj2_1009_mutex);
+				GSE_LOG("Gsensor device enable function enable = %d, sensor_power = %d!\n",value,sensor_power);
 				if(((value == 0) && (sensor_power == false)) ||((value == 1) && (sensor_power == true)))
 				{
+					enable_status = sensor_power;
 					GSE_LOG("Gsensor device have updated!\n");
 				}
 				else
 				{
+					if(sensor_suspend == 0){
+					enable_status = !sensor_power;
 					err = KXTJ2_1009_SetPowerMode( priv->client, !sensor_power);
+					GSE_LOG("Gsensor not in suspend KXTJ2_1009_SetPowerMode!, enable_status = %d\n",enable_status);
+					}else{
+					enable_status = !sensor_power;
+					GSE_LOG("Gsensor in suspend and can not enable or disable!enable_status = %d\n",enable_status);
+					}
 				}
+				mutex_unlock(&kxtj2_1009_mutex);
 			}
 			break;
 
@@ -1657,7 +1896,7 @@ static long kxtj2_1009_unlocked_ioctl(struct file *file, unsigned int cmd,unsign
 				err = -EINVAL;
 				break;	  
 			}
-			
+			KXTJ2_1009_SetPowerMode(client,true);	
 			KXTJ2_1009_ReadSensorData(client, strbuf, KXTJ2_1009_BUFSIZE);
 			if(copy_to_user(data, strbuf, strlen(strbuf)+1))
 			{
@@ -1797,7 +2036,7 @@ static int kxtj2_1009_suspend(struct i2c_client *client, pm_message_t msg)
 			return;
 		}
 
-		sensor_power = false;      
+		//sensor_power = false;      
 		KXTJ2_1009_power(obj->hw, 0);
 	}
 	return err;
@@ -1834,20 +2073,51 @@ static void kxtj2_1009_early_suspend(struct early_suspend *h)
 	int err;
 	GSE_FUN();    
 
+    // Jiangde Gestrure BEGIN, see GesturePhoneService.java for more information!
+	GSE_ERR("JiangdetestT Gsensor kxtj2_1009_early_suspend, no_early_suspend = %d \n", atomic_read(&obj_i2c_data->no_early_suspend));
+    s_g_stop_early_suspend = FALSE;
+    if (NULL != obj_i2c_data && 0 != atomic_read(&obj_i2c_data->no_early_suspend) )              
+    {
+        GSE_ERR("JiangdetestT Gsensor no_early_suspend = 1, no early suspend! \n");
+        sensor_suspend = 1;
+        s_g_stop_early_suspend = TRUE;
+        return;
+    }
+    // Jiangde Gestrure END    
+
 	if(obj == NULL)
 	{
 		GSE_ERR("null pointer!!\n");
 		return;
 	}
 	atomic_set(&obj->suspend, 1); 
+	mutex_lock(&kxtj2_1009_mutex);
+	GSE_FUN();  
+	u8 databuf[2]; //for debug read power control register to see the value is OK
+	if(KXTJ2_1009_i2c_read_block(obj->client, KXTJ2_1009_REG_POWER_CTL, databuf, 0x01))
+	{
+		GSE_ERR("read power ctl register err!\n");
+		mutex_unlock(&kxtj2_1009_mutex);
+		return KXTJ2_1009_ERR_I2C;
+	}
+	if(databuf[0]==0xff)//if the value is ff the gsensor will not work anymore, any i2c operations won't be vaild
+		GSE_LOG("before KXTJ2_1009_SetPowerMode in suspend databuf = 0x%x\n",databuf[0]);
 	if(err = KXTJ2_1009_SetPowerMode(obj->client, false))
 	{
 		GSE_ERR("write power control fail!!\n");
+		mutex_unlock(&kxtj2_1009_mutex);
 		return;
 	}
-
-	sensor_power = false;
-	
+	if(KXTJ2_1009_i2c_read_block(obj->client, KXTJ2_1009_REG_POWER_CTL, databuf, 0x01)) //for debug read power control register to see the value is OK
+	{
+		GSE_ERR("read power ctl register err!\n");
+		mutex_unlock(&kxtj2_1009_mutex);
+		return KXTJ2_1009_ERR_I2C;
+	}
+	if(databuf[0]==0xff)//if the value is ff the gsensor will not work anymore, any i2c operations won't be vaild
+		GSE_LOG("after KXTJ2_1009_SetPowerMode suspend err databuf = 0x%x\n",databuf[0]);
+	sensor_suspend = 1;
+	mutex_unlock(&kxtj2_1009_mutex);
 	KXTJ2_1009_power(obj->hw, 0);
 }
 /*----------------------------------------------------------------------------*/
@@ -1857,6 +2127,7 @@ static void kxtj2_1009_late_resume(struct early_suspend *h)
 	int err;
 	GSE_FUN();
 
+  	GSE_ERR("JiangdetestT Gsensor kxtj2_1009_late_resume \n");
 	if(obj == NULL)
 	{
 		GSE_ERR("null pointer!!\n");
@@ -1864,11 +2135,33 @@ static void kxtj2_1009_late_resume(struct early_suspend *h)
 	}
 
 	KXTJ2_1009_power(obj->hw, 1);
+	mutex_lock(&kxtj2_1009_mutex);
+	GSE_FUN();
+	u8 databuf[2];//for debug read power control register to see the value is OK
+	if(KXTJ2_1009_i2c_read_block(obj->client, KXTJ2_1009_REG_POWER_CTL, databuf, 0x01))
+	{
+		GSE_ERR("read power ctl register err!\n");
+		mutex_unlock(&kxtj2_1009_mutex);
+		return KXTJ2_1009_ERR_I2C;
+	}
+	if(databuf[0]==0xff)//if the value is ff the gsensor will not work anymore, any i2c operations won't be vaild
+		GSE_LOG("before KXTJ2_1009_init_client databuf = 0x%x\n",databuf[0]);
 	if(err = kxtj2_1009_init_client(obj->client, 0))
 	{
 		GSE_ERR("initialize client fail!!\n");
+		mutex_unlock(&kxtj2_1009_mutex);
 		return;        
 	}
+	if(KXTJ2_1009_i2c_read_block(obj->client, KXTJ2_1009_REG_POWER_CTL, databuf, 0x01)) //for debug read power control register to see the value is OK
+	{
+		GSE_ERR("read power ctl register err!\n");
+		mutex_unlock(&kxtj2_1009_mutex);
+		return KXTJ2_1009_ERR_I2C;
+	}
+	if(databuf[0]==0xff)//if the value is ff the gsensor will not work anymore, any i2c operations won't be vaild
+		GSE_LOG("after KXTJ2_1009_init_client databuf = 0x%x\n",databuf[0]);
+	sensor_suspend = 0;
+	mutex_unlock(&kxtj2_1009_mutex);
 	atomic_set(&obj->suspend, 0);    
 }
 /*----------------------------------------------------------------------------*/
@@ -1897,7 +2190,7 @@ static int kxtj2_1009_i2c_probe(struct i2c_client *client, const struct i2c_devi
 	
 	memset(obj, 0, sizeof(struct kxtj2_1009_i2c_data));
 
-	obj->hw = get_cust_acc_hw();
+	obj->hw = kxtj2_get_cust_acc_hw();
 	
 	if(err = hwmsen_get_convert(obj->hw->direction, &obj->cvt))
 	{
@@ -1912,6 +2205,7 @@ static int kxtj2_1009_i2c_probe(struct i2c_client *client, const struct i2c_devi
 	
 	atomic_set(&obj->trace, 0);
 	atomic_set(&obj->suspend, 0);
+    atomic_set(&obj->no_early_suspend, 0); // Jiangde Gestrure ++
 	
 #ifdef CONFIG_KXTJ2_1009_LOWPASS
 	if(obj->hw->firlen > C_MAX_FIR_LENGTH)
@@ -1944,7 +2238,7 @@ static int kxtj2_1009_i2c_probe(struct i2c_client *client, const struct i2c_devi
 		goto exit_misc_device_register_failed;
 	}
 
-	if(err = kxtj2_1009_create_attr(&kxtj2_1009_gsensor_driver.driver))
+	if(err = kxtj2_1009_create_attr(&(kxtj2_init_info.platform_diver_addr->driver)))
 	{
 		GSE_ERR("create attribute err = %d\n", err);
 		goto exit_create_attr_failed;
@@ -1952,7 +2246,7 @@ static int kxtj2_1009_i2c_probe(struct i2c_client *client, const struct i2c_devi
 
 	sobj.self = obj;
     sobj.polling = 1;
-    sobj.sensor_operate = gsensor_operate;
+    sobj.sensor_operate = kxtj2_operate;
 	if(err = hwmsen_attach(ID_ACCELEROMETER, &sobj))
 	{
 		GSE_ERR("attach fail = %d\n", err);
@@ -1986,7 +2280,7 @@ static int kxtj2_1009_i2c_remove(struct i2c_client *client)
 {
 	int err = 0;	
 	
-	if(err = kxtj2_1009_delete_attr(&kxtj2_1009_gsensor_driver.driver))
+	if(err = kxtj2_1009_delete_attr(&(kxtj2_init_info.platform_diver_addr->driver)))
 	{
 		GSE_ERR("kxtj2_1009_delete_attr fail: %d\n", err);
 	}
@@ -2004,6 +2298,45 @@ static int kxtj2_1009_i2c_remove(struct i2c_client *client)
 	kfree(i2c_get_clientdata(client));
 	return 0;
 }
+
+#if 1
+
+/*----------------------------------------------------------------------------*/
+static int kxtj2_remove(void)
+{
+    struct acc_hw *hw = kxtj2_get_cust_acc_hw();
+
+    GSE_FUN();    
+    KXTJ2_1009_power(hw, 0);    
+    i2c_del_driver(&kxtj2_1009_i2c_driver);
+    return 0;
+}
+/*----------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------*/
+
+static int  kxtj2_local_init(void)
+{
+   struct acc_hw *hw = kxtj2_get_cust_acc_hw();
+	GSE_FUN();
+
+	KXTJ2_1009_power(hw, 1);
+	if(i2c_add_driver(&kxtj2_1009_i2c_driver))
+	{
+		GSE_ERR("add driver error\n");
+		return -1;
+	}
+	if(-1 == kxtj2_init_flag)
+	{
+	   return -1;
+	}
+	
+	return 0;
+}
+
+#else
+
+
 /*----------------------------------------------------------------------------*/
 static int kxtj2_1009_probe(struct platform_device *pdev) 
 {
@@ -2035,29 +2368,31 @@ static struct platform_driver kxtj2_1009_gsensor_driver = {
 	.remove     = kxtj2_1009_remove,    
 	.driver     = {
 		.name  = "gsensor",
-		.owner = THIS_MODULE,
+//		.owner = THIS_MODULE,
 	}
 };
 
+#endif
 /*----------------------------------------------------------------------------*/
 static int __init kxtj2_1009_init(void)
 {
 	GSE_FUN();
-	struct acc_hw *hw = get_cust_acc_hw();
+	struct acc_hw *hw = kxtj2_get_cust_acc_hw();
 	GSE_LOG("%s: i2c_number=%d\n", __func__,hw->i2c_num);
 	i2c_register_board_info(hw->i2c_num, &i2c_kxtj2_1009, 1);
-	if(platform_driver_register(&kxtj2_1009_gsensor_driver))
+	hwmsen_gsensor_add(&kxtj2_init_info);
+	/*if(platform_driver_register(&kxtj2_1009_gsensor_driver))
 	{
 		GSE_ERR("failed to register driver");
 		return -ENODEV;
-	}
+	}*/
 	return 0;    
 }
 /*----------------------------------------------------------------------------*/
 static void __exit kxtj2_1009_exit(void)
 {
 	GSE_FUN();
-	platform_driver_unregister(&kxtj2_1009_gsensor_driver);
+//	platform_driver_unregister(&kxtj2_1009_gsensor_driver);
 }
 /*----------------------------------------------------------------------------*/
 module_init(kxtj2_1009_init);

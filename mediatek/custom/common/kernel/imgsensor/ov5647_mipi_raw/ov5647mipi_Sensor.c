@@ -122,13 +122,14 @@
 #include "ov5647mipi_Camera_Sensor_para.h"
 #include "ov5647mipi_CameraCustomized.h"
 
-static MSDK_SCENARIO_ID_ENUM CurrentScenarioId = MSDK_SCENARIO_ID_CAMERA_PREVIEW;
+MSDK_SCENARIO_ID_ENUM CurrentScenarioId = MSDK_SCENARIO_ID_CAMERA_PREVIEW;
 static kal_bool OV5647MIPIAutoFlicKerMode = KAL_FALSE;
 //static kal_bool OV5647MIPIZsdCameraPreview = KAL_FALSE;
 
 
-#define OV5647MIPI_DRIVER_TRACE
+//#define OV5647MIPI_DRIVER_TRACE
 #define OV5647MIPI_DEBUG
+//#define OV5647_USE_VIDEO_ZOOM
 
 #ifdef OV5647MIPI_DEBUG
 #define SENSORDB(fmt, arg...) xlog_printk(ANDROID_LOG_DEBUG, "[OV5647MIPI]", fmt, ##arg)
@@ -138,8 +139,6 @@ static kal_bool OV5647MIPIAutoFlicKerMode = KAL_FALSE;
 //#define ACDK
 extern int iReadRegI2C(u8 *a_pSendData , u16 a_sizeSendData, u8 * a_pRecvData, u16 a_sizeRecvData, u16 i2cId);
 extern int iWriteRegI2C(u8 *a_pSendData , u16 a_sizeSendData, u16 i2cId);
-//Ivan
-extern void set_maincam_powerdown(BOOL is_high);
 
 
 UINT32 OV5647MIPISetMaxFrameRate(UINT16 u2FrameRate);
@@ -690,8 +689,13 @@ static void OV5647MIPI_Set_Dummy(const kal_uint16 iPixels, const kal_uint16 iLin
 	  frame_height = OV5647MIPI_PV_PERIOD_LINE_NUMS + iLines;
 	}
 	else if (OV5647MIPI_sensor.video_mode) {
+	  #ifdef OV5647_USE_VIDEO_ZOOM
 	  line_length = OV5647MIPI_VIDEO_PERIOD_PIXEL_NUMS + iPixels;
 	  frame_height = OV5647MIPI_VIDEO_PERIOD_LINE_NUMS + iLines;
+	  #else
+	  line_length = OV5647MIPI_PV_PERIOD_PIXEL_NUMS + iPixels;
+	  frame_height = OV5647MIPI_PV_PERIOD_LINE_NUMS + iLines;
+	  #endif
 	}
 	else{
 	  line_length = OV5647MIPI_FULL_PERIOD_PIXEL_NUMS + iPixels;
@@ -726,9 +730,14 @@ UINT32 OV5647MIPISetMaxFrameRate(UINT16 u2FrameRate)
 	//dummy_line = OV5647MIPI_sensor.pclk / u2FrameRate / OV5647MIPI_PV_PERIOD_PIXEL_NUMS - OV5647MIPI_PV_PERIOD_LINE_NUMS;
 	FrameHeight= (10 * OV5647MIPI_sensor.pclk) / u2FrameRate / OV5647MIPI_sensor.line_length;
 	if(KAL_FALSE == OV5647MIPI_sensor.pv_mode){
+		if(KAL_FALSE == OV5647MIPI_sensor.video_mode){
 		if(FrameHeight < OV5647MIPI_FULL_PERIOD_LINE_NUMS)
 			FrameHeight = OV5647MIPI_FULL_PERIOD_LINE_NUMS;
-		
+			}
+		else{
+			if(FrameHeight < OV5647MIPI_VIDEO_PERIOD_LINE_NUMS)
+				FrameHeight = OV5647MIPI_VIDEO_PERIOD_LINE_NUMS;
+			}
 	}
 	    spin_lock_irqsave(&ov5647mipi_drv_lock,flags);
 		OV5647MIPI_sensor.frame_height = FrameHeight;
@@ -740,7 +749,11 @@ UINT32 OV5647MIPISetMaxFrameRate(UINT16 u2FrameRate)
 			dummy_line = FrameHeight - OV5647MIPI_PV_PERIOD_LINE_NUMS;
 		}
 		else if(CurrentScenarioId==MSDK_SCENARIO_ID_VIDEO_PREVIEW) {
+			#ifdef OV5647_USE_VIDEO_ZOOM //20130517 modified by mingji
 			dummy_line = FrameHeight - OV5647MIPI_VIDEO_PERIOD_LINE_NUMS;
+			#else
+			dummy_line = FrameHeight - OV5647MIPI_PV_PERIOD_LINE_NUMS;
+			#endif
 		}
 		SENSORDB("[soso][OV5647MIPISetMaxFrameRate]frameheight = %d, dummy_line=%d \n",OV5647MIPI_sensor.frame_height,dummy_line);
 		if(dummy_line<0) {
@@ -749,7 +762,7 @@ UINT32 OV5647MIPISetMaxFrameRate(UINT16 u2FrameRate)
 	    /* to fix VSYNC, to fix frame rate */
 		OV5647MIPI_Set_Dummy(0, dummy_line); /* modify dummy_pixel must gen AE table again */
 	//}
-	return TRUE;
+	return ERROR_NONE;
 }
 
 /*************************************************************************
@@ -820,7 +833,7 @@ kal_uint16 OV5647MIPI_SetGain(kal_uint16 iGain)
 	/* [0:3] = N meams N /16 X  */
 	/* [4:9] = M meams M X  */
 	/* Total gain = M + N /16 X */
-	SENSORDB("OV5747MIPI_SetGain::%x \n",iGain);
+	SENSORDB("OV5647MIPI_SetGain::%x \n",iGain);
 	iReg = OV5647MIPIGain2Reg(iGain);
 	SENSORDB("OV5647MIPI_SetGain,iReg:%x",iReg);
 	if (iReg < 0x10) iReg = 0x10;
@@ -1214,8 +1227,12 @@ OV5647MIPI_write_cmos_sensor(0x301c,0xf8);
 	OV5647MIPI_write_cmos_sensor(0x4001, 0x02);		 //add							  
 	OV5647MIPI_write_cmos_sensor(0x4000, 0x09);		//add							  
 	//OV5647MIPI_write_cmos_sensor(0x0010, 0x01);	    //add
-	OV5647MIPI_write_cmos_sensor(0x0100,0x01);   //modify
+
 	OV5647MIPI_write_cmos_sensor(0x3013,0x00);//liurui modfiy
+	OV5647MIPI_write_cmos_sensor(0x4005,0x18);//gain triger
+	OV5647MIPI_write_cmos_sensor(0x4050,0x37);//blc max
+	OV5647MIPI_write_cmos_sensor(0x4051,0x8f);//blc level trigger
+	OV5647MIPI_write_cmos_sensor(0x0100,0x01);   //modify
 	
 
 }   /*  OV5647MIPI_Sensor_Init  */   /*  OV5647MIPI_Sensor_Init  */
@@ -1246,14 +1263,15 @@ OV5647MIPI_write_cmos_sensor(0x380e,0x04);
 OV5647MIPI_write_cmos_sensor(0x380f,0x50);       
 OV5647MIPI_write_cmos_sensor(0x3814,0x11);
 OV5647MIPI_write_cmos_sensor(0x3815,0x11);              
-OV5647MIPI_write_cmos_sensor(0x3821,0x01);
-OV5647MIPI_write_cmos_sensor(0x3820,0x47);
+OV5647MIPI_write_cmos_sensor(0x3821,0x00);//0x01
+OV5647MIPI_write_cmos_sensor(0x3820,0x06);//0x47
 OV5647MIPI_write_cmos_sensor(0x3a09,0x4b);
 OV5647MIPI_write_cmos_sensor(0x3a0a,0x01);
 OV5647MIPI_write_cmos_sensor(0x3a0b,0x13);       
 OV5647MIPI_write_cmos_sensor(0x3a0d,0x04);
 OV5647MIPI_write_cmos_sensor(0x3a0e,0x03);       
 OV5647MIPI_write_cmos_sensor(0x4004, 0x04);
+OV5647MIPI_write_cmos_sensor(0x4005,0x18);//gain triger
 OV5647MIPI_write_cmos_sensor(0x4837,0x19);             
 OV5647MIPI_write_cmos_sensor(0x0100,0x01);
 
@@ -1315,6 +1333,7 @@ OV5647MIPI_write_cmos_sensor(0x3a0b,0xf6);
 OV5647MIPI_write_cmos_sensor(0x3a0d,0x04);
 OV5647MIPI_write_cmos_sensor(0x3a0e,0x03);
 	OV5647MIPI_write_cmos_sensor(0x4004, 0x02);	
+	OV5647MIPI_write_cmos_sensor(0x4005,0x18);//gain triger
 	OV5647MIPI_write_cmos_sensor(0x4837, 0x23);
 	OV5647MIPI_write_cmos_sensor(0x0100, 0x01);	
 
@@ -1363,14 +1382,15 @@ OV5647MIPI_write_cmos_sensor(0x380d,0xc0);
 	OV5647MIPI_write_cmos_sensor(0x380f,0xb6); 	
 	OV5647MIPI_write_cmos_sensor(0x3814,0x11); 	
 	OV5647MIPI_write_cmos_sensor(0x3815,0x11); 	
-OV5647MIPI_write_cmos_sensor(0x3821,0x01);
-OV5647MIPI_write_cmos_sensor(0x3820,0x47);      
+OV5647MIPI_write_cmos_sensor(0x3821,0x00);//0x01
+OV5647MIPI_write_cmos_sensor(0x3820,0x06); //0x47     
 OV5647MIPI_write_cmos_sensor(0x3a09,0x28);       
 OV5647MIPI_write_cmos_sensor(0x3a0a,0x00);
 OV5647MIPI_write_cmos_sensor(0x3a0b,0xf6);       
 OV5647MIPI_write_cmos_sensor(0x3a0d,0x08);
 OV5647MIPI_write_cmos_sensor(0x3a0e,0x06);       
 	OV5647MIPI_write_cmos_sensor(0x4004,0x04); 
+	OV5647MIPI_write_cmos_sensor(0x4005,0x1a);//always triger
 	OV5647MIPI_write_cmos_sensor(0x4837,0x19);
 	OV5647MIPI_write_cmos_sensor(0x0100,0x01); 	
 	
@@ -1408,11 +1428,12 @@ UINT32 OV5647MIPIOpen(void)
 	// check if sensor ID correct
 	sensor_id=((OV5647MIPI_read_cmos_sensor(0x300A) << 8) | OV5647MIPI_read_cmos_sensor(0x300B));   
 #ifdef OV5647MIPI_DRIVER_TRACE
+	SENSORDB("OV5647MIPIOpen, sensor_id:%x \n",sensor_id);
+#endif	
 	printk("OV5647MIPIOpen, sensor_id:%x \n",sensor_id);
-#endif		
+
 	if (sensor_id != OV5647MIPI_SENSOR_ID)
 		return ERROR_SENSOR_CONNECT_FAIL;
-	printk("Ivan OV5647MIPIOpen OK! \n");
 	
 	/* initail sequence write in  */
 	OV5647MIPI_Sensor_Init();
@@ -1469,31 +1490,93 @@ UINT32 OV5647MIPIOpen(void)
 * GLOBALS AFFECTED
 *
 *************************************************************************/
+static kal_uint16 OV5647MIPICheckSensorMID(void)//LINE <> <DATE20130508> <add sensor:sunny ov5647> wupingzhou
+{
+	kal_uint16 temp, i, otp_index;
+	//struct OV5647MIPI_otp_struct current_otp;
+	//kal_uint32 R_gain, B_gain, G_gain, G_gain_R,G_gain_B;
+	kal_uint32 address;
+    kal_uint16 customer_id;
+
+	SENSORDB("OV5647MIPICheckSensorMID\n");
+
+	//update white balance setting from OTP
+	//check first wb OTP with valid OTP
+	for(i = 0; i < 3; i++)
+		{
+			temp = OV5647MIPI_check_otp_wb(i);
+			if(temp == 2)
+				{
+					otp_index = i;
+					break;
+				}
+		}
+	if( 3 == i)
+		{
+		 	SENSORDB("[OV5647MIPI_update_wb_register_from_otp]no valid wb OTP data!\r\n");
+			return 0;
+		}
+
+       OV5647MIPI_write_cmos_sensor(0x0100, 0x01);	
+	 mdelay(1);  
+	//read otp into buffer
+	OV5647MIPI_write_cmos_sensor(0x3d21,0x01);
+
+	address = 0x3d05 +otp_index*9;
+
+	////4 modified the start address
+	//address = 0x05 + index*9 +1;
+
+	customer_id = (OV5647MIPI_read_cmos_sensor(address)&0x7f);
+	SENSORDB("[OV5647MIPI_read_otp_wb]address[%x]module_integrator_id[%x]\n",address,customer_id);
+
+	//disable otp read
+	OV5647MIPI_write_cmos_sensor(0x3d21,00);
+	
+       OV5647MIPI_write_cmos_sensor(0x0100, 0x00);	
+	
+	//do not clear OTP buffer
+		//clear otp buffer
+	//for(temp=0;temp<32;temp++){
+	//	OV5647MIPI_write_cmos_sensor(0x3d00+temp,0x00);
+	//}
+
+    if(customer_id == 0x2)
+        return 1;
+    else
+        return 0;
+    
+}
+
 UINT32 OV5647MIPIGetSensorID(UINT32 *sensorID) 
 {
 		// check if sensor ID correct
 	*sensorID=((OV5647MIPI_read_cmos_sensor(0x300A) << 8) | OV5647MIPI_read_cmos_sensor(0x300B));	
 #ifdef OV5647MIPI_DRIVER_TRACE
-	printk("OV5647MIPIGetSensorID, sensor_id:%x \n",*sensorID);
-#endif		
-	
-	if (*sensorID != OV5647MIPI_SENSOR_ID) {
-		//Try again with invert PWD Pin config
-		printk("OV5642GetSensorID Try again with PWD High \n");
+	SENSORDB("OV5647MIPIOpen, sensor_id:%x \n",*sensorID);
+#endif
 
-		//mt_set_gpio_out(GPIO_CAMERA_CMPDN_PIN,GPIO_OUT_ONE);
-		set_maincam_powerdown(GPIO_OUT_ONE);
-		mdelay(5);
-		*sensorID=((OV5647MIPI_read_cmos_sensor(0x300A) << 8) | OV5647MIPI_read_cmos_sensor(0x300B));	
-	    printk("OV5647MIPIGetSensorID, sensor_id:%x \n",*sensorID);
-	}
-	if (*sensorID != OV5647MIPI_SENSOR_ID) {	
+	if (*sensorID == OV5647MIPI_SENSOR_ID)//LINE <> <DATE20130508> <add sensor:sunny ov5647> wupingzhou
+    {
+            if (1 == OV5647MIPICheckSensorMID())
+            {
+                printk("This is truly ov5647 module.\n");
+                //*sensorID = OV5647MIPI_SENSOR_ID;
+                return ERROR_NONE;
+            }
+            else
+            {
+                printk("This is other OV5647 module.\n");
+		        *sensorID=0xFFFFFFFF;//line<20130402>wangyanhui add 
+		        return ERROR_SENSOR_CONNECT_FAIL;
+            }
+    }
+    else
+    {
+		*sensorID=0xFFFFFFFF;//line<20130402>wangyanhui add 
 		return ERROR_SENSOR_CONNECT_FAIL;
-	}
+    }
 
-    printk("Ivan OV5647MIPIGetSensorID OK! \n");
-	
-   return ERROR_NONE;
 }
 
 /*************************************************************************
@@ -1712,8 +1795,13 @@ UINT32 OV5647MIPIGetResolution(MSDK_SENSOR_RESOLUTION_INFO_STRUCT *pSensorResolu
 	pSensorResolution->SensorFullHeight=OV5647MIPI_IMAGE_SENSOR_FULL_HEIGHT;
 	pSensorResolution->SensorPreviewWidth=OV5647MIPI_IMAGE_SENSOR_PV_WIDTH;
 	pSensorResolution->SensorPreviewHeight=OV5647MIPI_IMAGE_SENSOR_PV_HEIGHT;	
+	#ifdef OV5647_USE_VIDEO_ZOOM	//20130517 modified by mingji
 	pSensorResolution->SensorVideoWidth=OV5647MIPI_IMAGE_SENSOR_VIDEO_WIDTH;
 	pSensorResolution->SensorVideoHeight=OV5647MIPI_IMAGE_SENSOR_VIDEO_HEIGHT;
+	#else
+	pSensorResolution->SensorVideoWidth=OV5647MIPI_IMAGE_SENSOR_PV_WIDTH;
+	pSensorResolution->SensorVideoHeight=OV5647MIPI_IMAGE_SENSOR_PV_HEIGHT;
+	#endif
 	pSensorResolution->Sensor3DFullWidth=OV5647MIPI_IMAGE_SENSOR_3D_FULL_WIDTH;
 	pSensorResolution->Sensor3DFullHeight=OV5647MIPI_IMAGE_SENSOR_3D_FULL_HEIGHT;
 	pSensorResolution->Sensor3DPreviewWidth=OV5647MIPI_IMAGE_SENSOR_3D_PV_WIDTH;
@@ -1745,6 +1833,9 @@ UINT32 OV5647MIPIGetInfo(MSDK_SCENARIO_ID_ENUM ScenarioId,
 			 break;
 
 		case MSDK_SCENARIO_ID_CAMERA_PREVIEW:
+		#ifndef OV5647_USE_VIDEO_ZOOM //20130517 modified by mingji
+		case MSDK_SCENARIO_ID_VIDEO_PREVIEW:
+		#endif
 		case MSDK_SCENARIO_ID_CAMERA_CAPTURE_JPEG:
 			 pSensorInfo->SensorPreviewResolutionX=OV5647MIPI_IMAGE_SENSOR_PV_WIDTH;
 	         pSensorInfo->SensorPreviewResolutionY=OV5647MIPI_IMAGE_SENSOR_PV_HEIGHT;
@@ -1752,6 +1843,7 @@ UINT32 OV5647MIPIGetInfo(MSDK_SCENARIO_ID_ENUM ScenarioId,
 			 pSensorInfo->SensorFullResolutionY=OV5647MIPI_IMAGE_SENSOR_FULL_HEIGHT;				 
 			 pSensorInfo->SensorCameraPreviewFrameRate=30;
 			 break;
+		#ifdef OV5647_USE_VIDEO_ZOOM	//20130517 modified by mingji
 		case MSDK_SCENARIO_ID_VIDEO_PREVIEW:
 			 pSensorInfo->SensorPreviewResolutionX=OV5647MIPI_IMAGE_SENSOR_VIDEO_WIDTH;
 	         pSensorInfo->SensorPreviewResolutionY=OV5647MIPI_IMAGE_SENSOR_VIDEO_HEIGHT;
@@ -1759,6 +1851,7 @@ UINT32 OV5647MIPIGetInfo(MSDK_SCENARIO_ID_ENUM ScenarioId,
 			 pSensorInfo->SensorFullResolutionY=OV5647MIPI_IMAGE_SENSOR_FULL_HEIGHT;				 
 			 pSensorInfo->SensorCameraPreviewFrameRate=30;			
 			break;
+		#endif
         case MSDK_SCENARIO_ID_CAMERA_3D_PREVIEW: //added
         case MSDK_SCENARIO_ID_CAMERA_3D_VIDEO:
         case MSDK_SCENARIO_ID_CAMERA_3D_CAPTURE: //added   
@@ -1810,6 +1903,9 @@ UINT32 OV5647MIPIGetInfo(MSDK_SCENARIO_ID_ENUM ScenarioId,
 	switch (ScenarioId)
 	{
 		case MSDK_SCENARIO_ID_CAMERA_PREVIEW:
+		#ifndef OV5647_USE_VIDEO_ZOOM //20130517 modified by mingji
+		case MSDK_SCENARIO_ID_VIDEO_PREVIEW:
+		#endif
 		//case MSDK_SCENARIO_ID_VIDEO_CAPTURE_MPEG4:
 			pSensorInfo->SensorClockFreq=24;
 			pSensorInfo->SensorClockDividCount=	3;
@@ -1829,6 +1925,7 @@ UINT32 OV5647MIPIGetInfo(MSDK_SCENARIO_ID_ENUM ScenarioId,
 
 		break;
 
+ 		#ifdef OV5647_USE_VIDEO_ZOOM	//20130517 modified by mingji
  		case MSDK_SCENARIO_ID_VIDEO_PREVIEW:
 			pSensorInfo->SensorClockFreq=24;
 			pSensorInfo->SensorClockDividCount=	3;
@@ -1847,6 +1944,7 @@ UINT32 OV5647MIPIGetInfo(MSDK_SCENARIO_ID_ENUM ScenarioId,
             pSensorInfo->SensorPacketECCOrder = 1;
 
 		break;
+		#endif
 		
 		case MSDK_SCENARIO_ID_CAMERA_CAPTURE_JPEG:
 		//case MSDK_SCENARIO_ID_CAMERA_CAPTURE_MEM:
@@ -1916,12 +2014,17 @@ UINT32 OV5647MIPIControl(MSDK_SCENARIO_ID_ENUM ScenarioId, MSDK_SENSOR_EXPOSURE_
 	switch (ScenarioId)
 	{
 		case MSDK_SCENARIO_ID_CAMERA_PREVIEW:
+		#ifndef OV5647_USE_VIDEO_ZOOM //20130517 modified by mingji
+		case MSDK_SCENARIO_ID_VIDEO_PREVIEW:
+		#endif
 		//case MSDK_SCENARIO_ID_VIDEO_CAPTURE_MPEG4:
 			  OV5647MIPIPreview(pImageWindow, pSensorConfigData);
 		break;
+		#ifdef OV5647_USE_VIDEO_ZOOM	//20130517 modified by mingji
 		case MSDK_SCENARIO_ID_VIDEO_PREVIEW:
 			OV5647MIPIVIDEO(pImageWindow, pSensorConfigData);
 		break;
+		#endif
 		case MSDK_SCENARIO_ID_CAMERA_CAPTURE_JPEG:
 		//case MSDK_SCENARIO_ID_CAMERA_CAPTURE_MEM:
 	    	OV5647MIPICapture(pImageWindow, pSensorConfigData);
@@ -1961,7 +2064,7 @@ UINT32 OV5647MIPISetVideoMode(UINT16 u2FrameRate)
 		spin_unlock(&ov5647mipi_drv_lock);
 	}else{
 		SENSORDB("[soso][OV5647MIPISetMaxFrameRate],Error Framerate, u2FrameRate=%d",u2FrameRate);
-		return TRUE;
+		return ERROR_NONE;
 		// TODO: Wrong configuratioin
 	}
 	
@@ -2038,9 +2141,17 @@ UINT32 OV5647MIPISetMaxFramerateByScenario(MSDK_SCENARIO_ID_ENUM scenarioId, MUI
 		case MSDK_SCENARIO_ID_VIDEO_PREVIEW:
 	    spin_lock(&ov5647mipi_drv_lock);
 			pclk = OV5647MIPI_VIDEO_CLK;
+			#ifdef OV5647_USE_VIDEO_ZOOM	//20130517 modified by mingji
 			lineLength = OV5647MIPI_VIDEO_PERIOD_PIXEL_NUMS;
+			#else
+			lineLength = OV5647MIPI_PV_PERIOD_PIXEL_NUMS;
+			#endif
 			frameHeight = (10 * pclk)/frameRate/lineLength;
+			#ifdef OV5647_USE_VIDEO_ZOOM	//20130517 modified by mingji
 			dummyLine = frameHeight - OV5647MIPI_VIDEO_PERIOD_LINE_NUMS;
+			#else
+			dummyLine = frameHeight - OV5647MIPI_PV_PERIOD_LINE_NUMS;
+			#endif
 		spin_unlock(&ov5647mipi_drv_lock);
 			if(dummyLine<0) {
 				dummyLine=0;

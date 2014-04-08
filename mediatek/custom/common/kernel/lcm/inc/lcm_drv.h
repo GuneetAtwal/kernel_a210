@@ -464,6 +464,7 @@ typedef struct
 	unsigned int		horizontal_backporch;
 	unsigned int		horizontal_frontporch;
 	unsigned int		horizontal_active_pixel;
+	unsigned int		horizontal_bllp;
 
 	unsigned int		line_byte;
 	unsigned int		horizontal_sync_active_byte;
@@ -504,7 +505,8 @@ typedef struct
 	unsigned int		rg_bic;
 	unsigned int		rg_bp;
 	LCM_DSI_PLL_CLOCK	PLL_CLOCK;
-	
+	unsigned int		compatibility_for_nvk;
+	unsigned int		cont_clock;
 	unsigned int		lcm_int_te_monitor;
 	unsigned int		lcm_int_te_period;
 	
@@ -589,6 +591,10 @@ typedef struct
     void (*suspend)(void);
     void (*resume)(void);
 
+    // for power-on sequence refinement    
+    void (*suspend_power)(void);
+    void (*resume_power)(void);
+
     void (*update)(unsigned int x, unsigned int y,
                    unsigned int width, unsigned int height);
 	unsigned int (*compare_id)(void);
@@ -604,8 +610,9 @@ typedef struct
     unsigned int  (*esd_recover)(void);
 	unsigned int (*check_status)(void);
 /////////////////////////////////////////////////
-	//edit by Magnum used for debug LCD 
-	void (*m_debug)(char * buf);
+
+    //LINE<JIRA_ID><DATE20130717><sharp lcd flicker problem>zenghaihui
+    void (*earlysuspendsharp)(void);
 
 } LCM_DRIVER;
 

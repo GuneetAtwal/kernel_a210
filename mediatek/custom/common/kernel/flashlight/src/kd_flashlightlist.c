@@ -28,9 +28,7 @@ MUINT32 dummyFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
 MUINT32 peakFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
 MUINT32 torchFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
 MUINT32 constantFlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
-#if defined(SGM3780_FLASHLIGHT)
-MUINT32 sgm3780FlashlightInit(PFLASHLIGHT_FUNCTION_STRUCT *pfFunc);
-#endif
+
 
 #ifdef MTK_SUB_STROBE_SUPPORT
 
@@ -53,14 +51,14 @@ KD_FLASHLIGHT_INIT_FUNCTION_STRUCT kdFlashlightList[] =
 #if defined(CONSTANT_FLASHLIGHT)
 	{constantFlashlightInit},
 #endif
-#if defined(SGM3780_FLASHLIGHT)
-	{sgm3780FlashlightInit},
-#endif
+
 
 #ifdef MTK_SUB_STROBE_SUPPORT
 	{subStrobeInit},
+
 #else
 	{defaultFlashlightInit},
+
 #endif
 
 /*  ADD flashlight driver before this line */

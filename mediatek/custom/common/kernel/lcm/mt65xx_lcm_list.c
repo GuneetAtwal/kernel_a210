@@ -35,9 +35,6 @@ extern LCM_DRIVER nt35510_dpi_lcm_drv;
 extern LCM_DRIVER nt35510_hvga_lcm_drv;
 extern LCM_DRIVER nt35510_qvga_lcm_drv;
 extern LCM_DRIVER nt35510_6517_lcm_drv;
-extern LCM_DRIVER nt35510_dsi_lcm_drv;
-extern LCM_DRIVER lt4015w_dsi_lcm_drv;
-extern LCM_DRIVER lt5002f_dsi_lcm_drv;
 extern LCM_DRIVER r63303_idisplay_lcm_drv;
 extern LCM_DRIVER hj080ia_lcm_drv;
 extern LCM_DRIVER hj101na02a_lcm_drv;
@@ -67,38 +64,10 @@ extern LCM_DRIVER bp101wx1_n_lcm_drv;
 extern LCM_DRIVER nt35516_qhd_rav4_lcm_drv;
 extern LCM_DRIVER r63311_fhd_dsi_vdo_sharp_lcm_drv;
 extern LCM_DRIVER nt35596_fhd_dsi_vdo_truly_lcm_drv;
-extern LCM_DRIVER hx8389b_qhd_dsi_vdo_truly_lcm_drv;
-extern LCM_DRIVER hx8389b_qhd_dsi_vdo_tcl_lcm_drv;
-//Ivan
-extern LCM_DRIVER hx8394a_dsi_vdo_lcm_drv;
-extern LCM_DRIVER nt35517_qhd_dsi_vdo_lcm_drv;
 
+extern LCM_DRIVER otm1083a_dsi_vdo_lcm_drv;
 LCM_DRIVER* lcm_driver_list[] = 
 { 
-#if defined(LT4015W_DSI)
-	&lt4015w_dsi_lcm_drv,
-#endif
-
-#if defined(NT35517_QHD_DSI_VDO)
-	&nt35517_qhd_dsi_vdo_lcm_drv, 
-#endif
-
-#if defined(HX8389B_QHD_DSI_VDO_TRULY)
-        &hx8389b_qhd_dsi_vdo_truly_lcm_drv,
-#endif
-
-#if defined(HX8389B_QHD_DSI_VDO_TCL)
-        &hx8389b_qhd_dsi_vdo_tcl_lcm_drv,
-#endif
-
-#if defined(LT5002F_DSI)
-	&lt5002f_dsi_lcm_drv,
-#endif
-
-#if defined(HX8394A_DSI_VDO)
-	&hx8394a_dsi_vdo_lcm_drv,
-#endif
-	
 #if defined(HX8369)
 	&hx8369_lcm_drv,
 #endif
@@ -272,11 +241,6 @@ LCM_DRIVER* lcm_driver_list[] =
 #if defined(TM070DDH03)
 	&tm070ddh03_lcm_drv,
 #endif
-
-#if defined(NT35510_DSI)
-	&nt35510_dsi_lcm_drv,
-#endif
-
 #if defined(R63303_IDISPLAY)
 	&r63303_idisplay_lcm_drv,
 #endif
@@ -360,7 +324,9 @@ LCM_DRIVER* lcm_driver_list[] =
 	&nt35596_fhd_dsi_vdo_truly_lcm_drv,
 #endif
 
-
+#if defined(OTM1083A_DSI_VDO)
+	&otm1083a_dsi_vdo_lcm_drv,
+#endif	
 };
 
 #define LCM_COMPILE_ASSERT(condition) LCM_COMPILE_ASSERT_X(condition, __LINE__)

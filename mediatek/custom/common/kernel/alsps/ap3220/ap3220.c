@@ -30,7 +30,6 @@
 #include <mach/mt_gpio.h>
 #include <mach/mt_pm_ldo.h>
 
-
 #define POWER_NONE_MACRO MT65XX_POWER_NONE
 
 #include <linux/hwmsensor.h>
@@ -40,6 +39,36 @@
 #include <cust_eint.h>
 #include <cust_alsps.h>
 #include "ap3220.h"
+
+
+//LINE<JIRA_ID><DATE20131021><add jtouch white tp>zenghaihui
+#define S9311_WHITE_TP_CHECK
+#ifdef  S9311_WHITE_TP_CHECK
+
+#define TP_TYPE_CHECK_DELAY        500
+
+static struct delayed_work tp_type_check_work;
+static struct workqueue_struct *tp_type_check_workqueue = NULL;
+
+static int g_tp_tpye_checked=0;
+static int g_tp_read_error_count=0;
+
+static void ap3220_jtouch_white_tp_threshold_reset(void);
+static void ap3220_read_tp_type(void);
+static void ap3220_tp_tpye_delay_check(struct work_struct *work);
+
+extern char * synaptics_get_vendor_info(void);
+
+#define S9311_WHITE_TP_EXCEPTION_CHECK
+#ifdef  S9311_WHITE_TP_EXCEPTION_CHECK
+static int ap3220_jtouch_white_tp_exception_check_enable_ps(struct i2c_client *client, int enable);
+static void ap3220_jtouch_white_tp_check_exception_tp(void);
+static void ap3220_jtouch_white_tp_threshold_reset_exception_tp(u16 vl_value_high, u16 vl_value_low);
+#endif /* S9311_WHITE_TP_EXCEPTION_CHECK */
+
+
+#endif
+
 /******************************************************************************
  * configuration
 *******************************************************************************/
@@ -56,28 +85,16 @@
 //Ivan
 #define ALS_QUEUE_LEN	3
 
-#define TINNO_PS_STARTUP_IRQ	//Ivan
-
-//Ivan
-#ifdef TINNO_PS_STARTUP_IRQ	
-static struct delayed_work ps_startup_irq_work;
-static struct workqueue_struct * ps_startup_irq_workqueue = NULL;
-static void ps_startup_irq_func(struct work_struct *);
-#define STARTUP_IRQ_DELAY 10
-#endif
-
 /******************************************************************************
 * extern functions 
 *******************************************************************************/
 
-		extern void mt65xx_eint_unmask(unsigned int line);
-		extern void mt65xx_eint_mask(unsigned int line);
-		extern void mt65xx_eint_set_polarity(unsigned int eint_num, unsigned int pol);
-		extern void mt65xx_eint_set_hw_debounce(unsigned int eint_num, unsigned int ms);
-		extern unsigned int mt65xx_eint_set_sens(unsigned int eint_num, unsigned int sens);
-		extern void mt65xx_eint_registration(unsigned int eint_num, unsigned int is_deb_en, unsigned int pol, void (EINT_FUNC_PTR)(void), unsigned int is_auto_umask);
-		extern void mt_eint_soft_set(unsigned int eint_num);
-		extern void mt_eint_soft_clr(unsigned int eint_num);
+extern void mt65xx_eint_unmask(unsigned int line);
+extern void mt65xx_eint_mask(unsigned int line);
+extern void mt65xx_eint_set_polarity(unsigned int eint_num, unsigned int pol);
+extern void mt65xx_eint_set_hw_debounce(unsigned int eint_num, unsigned int ms);
+extern unsigned int mt65xx_eint_set_sens(unsigned int eint_num, unsigned int sens);
+extern void mt65xx_eint_registration(unsigned int eint_num, unsigned int is_deb_en, unsigned int pol, void (EINT_FUNC_PTR)(void), unsigned int is_auto_umask);
 
 /*----------------------------------------------------------------------------*/
 static int ap3220_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id); 
@@ -168,11 +185,7 @@ static struct PS_CALI_DATA_STRUCT ps_cali={0,0,0};
 //Ivan added
 static u16 g_als_value_queue[ALS_QUEUE_LEN]={0,0,0};
 static u16 g_als_value_previous = 0;
-//Ivan added
-#ifdef TINNO_PS_STARTUP_IRQ	
-static int g_emu_int = 0;
-static int g_first_int = 0;
-#endif
+
 /*----------------------------------------------------------------------------*/
 
 
@@ -194,17 +207,6 @@ typedef enum {
 } CMC_TRC;
 
 
-#ifdef TINNO_PS_STARTUP_IRQ	
-static void ps_startup_irq_func(struct work_struct *work)
-{   
-    if (g_emu_int == 0)
-    {
-	mt_eint_soft_set(CUST_EINT_ALS_NUM);
-	APS_ERR("debug ps_startup_irq_func!");	
-	g_emu_int = 1;
-    }
-}
-#endif
 /* 
  * #########
  * ## I2C ##
@@ -291,6 +293,8 @@ static void ap3220_power(struct alsps_hw *hw, unsigned int on)
 	power_on = on;
 }
 /********************************************************************/
+
+void ap3220_data_send_again();//LINE add by panchenjun
 int ap3220_enable_ps(struct i2c_client *client, int enable)
 {
 	struct ap3220_priv *obj = i2c_get_clientdata(client);
@@ -317,9 +321,12 @@ int ap3220_enable_ps(struct i2c_client *client, int enable)
 			
 			atomic_set(&obj->ps_deb_on, 1);
 			atomic_set(&obj->ps_deb_end, jiffies+atomic_read(&obj->ps_debounce)/(1000/HZ));
-#ifdef TINNO_PS_STARTUP_IRQ						
-			g_first_int = 0;
-#endif			
+                        APS_LOG("ap3220_enable_ps enable_ps databuf[0]=%x \n",databuf[0]);
+                        //BEGIN add by panchenjun
+                        if(databuf[0] == AP3220_SYSTEM_DEVICE_MASK){
+                            ap3220_data_send_again();
+                        }
+                        //END add by panchenjun
 		}
 	else{
 			APS_LOG("ap3220_enable_ps disable_ps\n");
@@ -402,9 +409,6 @@ long ap3220_read_ps(struct i2c_client *client, u16 *data)
 {
 	long res;
 	u8 databuf[2];
-	u8 ps_l, ps_h;
-	u16 ps_val;
-	
 //	APS_FUN(f);
 	res = ap3220_i2c_read_reg(AP3220_REG_SYS_PS_DATA_LOW,&databuf[0]);
 	res = ap3220_i2c_read_reg(AP3220_REG_SYS_PS_DATA_HIGH,&databuf[1]);
@@ -415,15 +419,9 @@ long ap3220_read_ps(struct i2c_client *client, u16 *data)
 	}
 	
 //	APS_LOG("AP3220_REG_PS_DATA value value_low = %x, value_high = %x\n",databuf[0],databuf[1]);
-	*data = ((databuf[1]<<8)|databuf[0]);
-	
-	ps_l = *data & 0x00FF;
-	ps_h = *data >> 8;
-	ps_val = ps_h << 2 | ps_l & 0x03;
-//Ivan
-	printk("ALSPS Ivan ps_val = %x \n",ps_val);
-	
-	APS_LOG("ALSPS Ivan AP3220_REG_PS_DATA value %d\n",*data);	
+	*data = ((databuf[1] & 0x3f) << 4 |(databuf[0] & 0x0f));
+	//*data = ((databuf[1]<<8)|databuf[0]);
+//	APS_LOG("AP3220_REG_PS_DATA value %d\n",*data);	
 	return 0;
 READ_PS_EXIT_ERR:
 	return res;
@@ -459,9 +457,10 @@ static int ap3220_get_ps_value(struct ap3220_priv *obj, u16 ps)
 	u8 ps_l, ps_h;
 	u16 ps_val;
 	
-	ps_l = ps & 0x00FF;
-	ps_h = ps >> 8;
-	ps_val = ps_h << 2 | ps_l & 0x03;
+	//ps_l = ps & 0x00FF;
+	//ps_h = ps >> 8;
+	//ps_val = (ps_h & 0x3f) << 4 | (ps_l & 0x0f);
+	ps_val =ps;
 	if(ps_val > atomic_read(&obj->ps_thd_val_high))
 	{
 		val = 0;  /*close*/
@@ -718,10 +717,10 @@ static ssize_t ap3220_show_reg(struct device_driver *ddri, char *buf)
 		APS_ERR("ap3220_obj is null!!\n");
 		return 0;
 	}
-	
-	
-	return 0;
+
+        return 0;
 }
+
 /*----------------------------------------------------------------------------*/
 static ssize_t ap3220_show_send(struct device_driver *ddri, char *buf)
 {
@@ -977,9 +976,7 @@ static int ap3220_check_intr(struct i2c_client *client)
 	u8 databuf[2];
 	u8 intr_status;
 	u8 intr;
-	U8 ret = 0;
 	
-	ret= 0;
 	res = ap3220_i2c_read_reg(AP3220_REG_SYS_ISTATUS,&intr_status);
 	if(res < 0)
 	{
@@ -996,7 +993,7 @@ static int ap3220_check_intr(struct i2c_client *client)
 	    if(res < 0)
 	    {
 		    APS_ERR("i2c_master_send function err\n");
-//		    goto EXIT_ERR;
+		    goto EXIT_ERR;
 	    }
 	    
 //thrown away the data????	    
@@ -1014,7 +1011,8 @@ static int ap3220_check_intr(struct i2c_client *client)
 		    APS_ERR("i2c_master_send function err\n");
 		    goto EXIT_ERR;
 	    }
-	    if (!(databuf[0] & AP3220_SYSTEM_PS_IR_OVERFLOW) && !(databuf[1] & AP3220_SYSTEM_PS_IR_OVERFLOW))
+//	    if (!(databuf[0] & AP3220_SYSTEM_PS_IR_OVERFLOW) && !(databuf[1] & AP3220_SYSTEM_PS_IR_OVERFLOW))
+	    if (1)//LINE<DATE2013123><screen cant resume on under sunshine>zhuxiankun
 	    {
 		if (databuf[0] & AP3220_SYSTEM_PS_OBJ_CLOSE)
 		    intr_flag = 0;//for close
@@ -1023,21 +1021,54 @@ static int ap3220_check_intr(struct i2c_client *client)
 	    }
 	    else
 	    {
-		intr_flag = 1;//for away
-//		res = -1;		
-//		goto EXIT_ERR;
+		res = -1;		
+		goto EXIT_ERR;
 	    }
-	    ret = 1;
 	}
 
 //	APS_LOG("AP3220_REG_INT_FLAG value value_low = %x, value_high = %x\n",databuf[0],databuf[1]);
 	
-	return ret;
+	return 0;
 EXIT_ERR:
 	APS_ERR("ap3220_check_intr dev: %d\n", res);
-	return -1;
+	return res;
 }
 /*----------------------------------------------------------------------------*/
+
+//BEGIN add by panchenjun
+void ap3220_data_send_again()
+{
+    hwm_sensor_data sensor_data;
+    int res = 0;
+    u8 ps_data;
+    res = ap3220_i2c_read_reg(AP3220_REG_SYS_PS_DATA_LOW,&ps_data);
+    APS_ERR("call ap3220_data_send_again fail = %d\n", res);
+    if(res<0){
+        goto EXIT_INTR_ERR;
+    }else{
+        if (ps_data & AP3220_SYSTEM_PS_OBJ_CLOSE){
+            sensor_data.values[0] = 0;
+        }else{
+            sensor_data.values[0] = 1;
+            goto EXIT_INTR_ERR;
+        }
+    }
+    
+    sensor_data.value_divide = 1;
+    sensor_data.status = SENSOR_STATUS_ACCURACY_MEDIUM;	
+    APS_LOG("ap3220_data_send_again intr_flag = %x\n",intr_flag);	
+    if((res = hwmsen_get_interrupt_data(ID_PROXIMITY, &sensor_data)))
+    	{
+    	  APS_ERR("call hwmsen_get_interrupt_data fail = %d\n", res);
+    	  goto EXIT_INTR_ERR;
+    	}
+    mt65xx_eint_unmask(CUST_EINT_ALS_NUM);
+    return;
+    EXIT_INTR_ERR:
+    mt65xx_eint_unmask(CUST_EINT_ALS_NUM);
+    APS_ERR("ap3220_eint_work err: %d\n", res);
+}
+//END add by panchenjun
 static void ap3220_eint_work(struct work_struct *work)
 {
 	struct ap3220_priv *obj = (struct ap3220_priv *)container_of(work, struct ap3220_priv, eint_work);
@@ -1047,27 +1078,13 @@ static void ap3220_eint_work(struct work_struct *work)
 
 #if 1
 	res = ap3220_check_intr(obj->client);
-	if(res < 0){
+	if(res != 0){
 		goto EXIT_INTR_ERR;
 	}else{
 		sensor_data.values[0] = intr_flag;
 		sensor_data.value_divide = 1;
 		sensor_data.status = SENSOR_STATUS_ACCURACY_MEDIUM;	
-#ifdef TINNO_PS_STARTUP_IRQ			
-		if (g_emu_int)
-		{
-		    g_emu_int = 0;
-		    mt_eint_soft_clr(CUST_EINT_ALS_NUM);
-		    if (g_first_int == 0)
-		    {
-			intr_flag = 1;
-			sensor_data.values[0] = intr_flag;
-		    }
-		    g_first_int = 1;
-		}
-		if (res >= 1)
-		    g_first_int = 1;
-#endif		
+
 	}
 	APS_LOG("AP3220_eint_work intr_flag = %x\n",intr_flag);		
 	if((res = hwmsen_get_interrupt_data(ID_PROXIMITY, &sensor_data)))
@@ -1090,10 +1107,7 @@ static void ap3220_eint_func(void)
 	{
 		return;
 	}	
-//	APS_ERR("debug ap3220_eint_func!");
-//Ivan	
-	if (g_emu_int == 1)
-	    mt65xx_eint_mask(CUST_EINT_ALS_NUM);	
+	APS_ERR("debug ap3220_eint_func!");
 	schedule_work(&obj->eint_work);
 }
 
@@ -1148,7 +1162,16 @@ static long ap3220_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
 		int dat;
 		uint32_t enable;
 		int ps_result;
+		static int factory_status = 0; //LINE<20130718><for ftm>wangyanhui
 		
+    //LINE<JIRA_ID><DATE20131021><add jtouch white tp>zenghaihui
+    #ifdef  S9311_WHITE_TP_CHECK
+        if(0 ==g_tp_tpye_checked)
+        {
+            APS_LOG("check tp type in  ap3220_unlocked_ioctl \n");
+            ap3220_read_tp_type();
+        }
+    #endif
 		switch (cmd)
 		{
 			case ALSPS_SET_PS_MODE:
@@ -1208,6 +1231,22 @@ static long ap3220_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
 				}
 				
 				dat = obj->ps;
+				
+                            //BEGIN<20130718><for ftm>wangyanhui
+                            //LINE<JIRA_ID><DATE20130115><for ftm>zenghaihui
+                            if(obj->ps > atomic_read(&obj->ps_thd_val_high))
+                            {
+                                //dat = 0;  /*close*/
+                                factory_status = 0;
+                            }
+                            else if(obj->ps < atomic_read(&obj->ps_thd_val_low))
+                            {
+                                //dat = 1;  /*far*/
+                                factory_status =1;
+                            }
+                            dat = factory_status;
+                            //END<20130718><for ftm>wangyanhui	
+                            
 				if(copy_to_user(ptr, &dat, sizeof(dat)))
 				{
 					err = -EFAULT;
@@ -1298,25 +1337,6 @@ static long ap3220_unlocked_ioctl(struct file *file, unsigned int cmd, unsigned 
 				}			   
 				break;
 			/*------------------------------------------------------------------------------------------*/
-			case ALSPS_GET_PS_THRESHOLD_HIGH:
-				dat = atomic_read(&obj->ps_thd_val_high);
-				if(copy_to_user(ptr, &dat, sizeof(dat)))
-				{
-					err = -EFAULT;
-					goto err_out;
-				}			   			    
-			    break;
-			    
-			    
-			case ALSPS_GET_PS_THRESHOLD_LOW:
-				dat = atomic_read(&obj->ps_thd_val_low);
-				if(copy_to_user(ptr, &dat, sizeof(dat)))
-				{
-					err = -EFAULT;
-					goto err_out;
-				}			   			    
-			    break;
-			
 			
 			default:
 				APS_ERR("%s not supported = 0x%04x", __FUNCTION__, cmd);
@@ -1455,8 +1475,9 @@ static int ap3220_init_client(struct i2c_client *client)
 	}
 	
 //PS Configuration 
-	data = (AP3220_PS_SETTING_INTG_TIME_1 << AP3220_PS_INTEGEATED_TIME_SHIFT) & AP3220_PS_INTEGEATED_TIME_MASK;
-	data2 = (AP3220_PS_SETTING_GAIN_1 << AP3220_PS_GAIN_SHIFT) & AP3220_PS_GAIN_MASK;
+//LINE<JIRA_ID><DATE2013117><ps parameter modify>zhuxiankun
+	data = (AP3220_PS_SETTING_INTG_TIME_9 << AP3220_PS_INTEGEATED_TIME_SHIFT) & AP3220_PS_INTEGEATED_TIME_MASK;
+	data2 = (AP3220_PS_SETTING_GAIN_2 << AP3220_PS_GAIN_SHIFT) & AP3220_PS_GAIN_MASK;
 	data3 = (AP3220_PS_SETTING_PERSIST_2 << AP3220_PS_PERSIST_SHIFT) & AP3220_PS_PERSIST_MASK;	
 	data |= data2;
 	data |= data3;
@@ -1467,8 +1488,8 @@ static int ap3220_init_client(struct i2c_client *client)
 		goto EXIT_ERR;
 	}
 //PS LED Control
-	data = (AP3220_PS_SETTING_LED_PULSE_1 << AP3220_PS_LED_PULSE_SHIFT) & AP3220_PS_LED_PULSE_MASK;
-	data2 = (AP3220_PS_SETTING_LED_RATIO_66 << AP3220_PS_LED_RATIO_SHIFT) & AP3220_PS_LED_RATIO_MASK;
+	data = (AP3220_PS_SETTING_LED_PULSE_2<< AP3220_PS_LED_PULSE_SHIFT) & AP3220_PS_LED_PULSE_MASK;
+	data2 = (AP3220_PS_SETTING_LED_RATIO_100 << AP3220_PS_LED_RATIO_SHIFT) & AP3220_PS_LED_RATIO_MASK;
 	data |= data2;
 	res = ap3220_i2c_write_reg(AP3220_REG_PS_LED,data);
 	if(res < 0)
@@ -1485,7 +1506,8 @@ static int ap3220_init_client(struct i2c_client *client)
 		goto EXIT_ERR;
 	}
 //PS MEAN TIME
-	data = AP3220_PS_SETTING_PS_MEAN_12;
+//LINE<JIRA_ID><DATE2013117><ps parameter modify>zhuxiankun
+	data = AP3220_PS_SETTING_PS_MEAN_50;//AP3220_PS_SETTING_PS_MEAN_12; 
 	res = ap3220_i2c_write_reg(AP3220_REG_PS_MEAN_TIME,data);
 	if(res < 0)
 	{
@@ -1588,6 +1610,16 @@ long ap3220_ps_operate(void* self, uint32_t command, void* buff_in, int size_in,
 		hwm_sensor_data* sensor_data;
 		struct ap3220_priv *obj = (struct ap3220_priv *)self;		
 		APS_FUN(f);
+            
+        //LINE<JIRA_ID><DATE20131021><add jtouch white tp>zenghaihui
+        #ifdef  S9311_WHITE_TP_CHECK
+            if(0 ==g_tp_tpye_checked)
+            {
+                APS_LOG("check tp type in  ap3220_ps_operate \n");
+                ap3220_read_tp_type();
+            }
+        #endif
+
 		switch (command)
 		{
 			case SENSOR_DELAY:
@@ -1617,10 +1649,6 @@ long ap3220_ps_operate(void* self, uint32_t command, void* buff_in, int size_in,
 							return -1;
 						}
 						set_bit(CMC_BIT_PS, &obj->enable);
-//Ivan
-#ifdef TINNO_PS_STARTUP_IRQ
-						queue_delayed_work(ps_startup_irq_workqueue, &ps_startup_irq_work,STARTUP_IRQ_DELAY);
-#endif						
 					}
 					else
 					{
@@ -1821,6 +1849,25 @@ static int ap3220_i2c_probe(struct i2c_client *client, const struct i2c_device_i
 	}
 	APS_LOG("ap3220_device misc_register OK!\n");
 
+    
+    //LINE<JIRA_ID><DATE20131021><add jtouch white tp>zenghaihui
+    #if 0 // def  S9311_WHITE_TP_CHECK
+        APS_LOG("read tp type in ap3220_i2c_probe \n");
+        ap3220_read_tp_type();
+        if(0 ==g_tp_tpye_checked)
+        {
+            APS_LOG("read tp type error in ap3220_i2c_probe,delay 5s to re-check\n");
+            
+            INIT_DELAYED_WORK(&tp_type_check_work, ap3220_tp_tpye_delay_check);
+            tp_type_check_workqueue = create_workqueue("ap3220_tp_tpye_delay_check");
+            queue_delayed_work(tp_type_check_workqueue, &tp_type_check_work, TP_TYPE_CHECK_DELAY);
+        }
+        else
+        {
+            APS_LOG("read tp type OK in ap3220_i2c_probe \n");
+        }
+    #endif
+
 	/*------------------------ap3220 attribute file for debug--------------------------------------*/
 	if((err = ap3220_create_attr(&ap3220_alsps_driver.driver)))
 	{
@@ -1854,13 +1901,6 @@ static int ap3220_i2c_probe(struct i2c_client *client, const struct i2c_device_i
 	register_early_suspend(&obj->early_drv);
 	#endif
 
-#ifdef TINNO_PS_STARTUP_IRQ
-	ps_startup_irq_workqueue = create_workqueue("ps_startup_irq");
-	
-	INIT_DELAYED_WORK(&ps_startup_irq_work, ps_startup_irq_func);
-	
-//	queue_delayed_work(ps_startup_irq_workqueue, &ps_startup_irq_work,STARTUP_IRQ_DELAY);
-#endif
 	APS_LOG("%s: OK\n", __func__);
 	return 0;
 
@@ -1943,13 +1983,335 @@ static int ap3220_remove(struct platform_device *pdev)
 	ap3220_power(hw, 0);//*****************  
 	
 	i2c_del_driver(&ap3220_i2c_driver);
-	
-#ifdef TINNO_PS_STARTUP_IRQ
-	destroy_workqueue(ps_startup_irq_workqueue);
-#endif
 	return 0;
 }
 
+
+
+//LINE<JIRA_ID><DATE20131021><add jtouch white tp>zenghaihui
+#ifdef  S9311_WHITE_TP_CHECK
+
+static void ap3220_jtouch_white_tp_threshold_reset(void)
+{
+	u8 data, data2, data3;
+	u16 value_high,value_low;
+	int res =0;
+
+        /******************************
+         same as in cust_alsps.c
+        .ps_threshold_high = 0x240,
+        .ps_threshold_low = 0x230,
+        **********************************/
+	value_high= 0x180; // 0x240;
+	value_low= 0x175; // 0x230;
+
+        
+	atomic_set(&ap3220_obj->ps_thd_val_high, value_high);
+	atomic_set(&ap3220_obj->ps_thd_val_low,  value_low);
+
+    
+    //PS LED Control
+        data = (AP3220_PS_SETTING_LED_PULSE_2<< AP3220_PS_LED_PULSE_SHIFT) & AP3220_PS_LED_PULSE_MASK;
+        data2 = (AP3220_PS_SETTING_LED_RATIO_16 << AP3220_PS_LED_RATIO_SHIFT) & AP3220_PS_LED_RATIO_MASK;
+        data |= data2;
+        res = ap3220_i2c_write_reg(AP3220_REG_PS_LED,data);
+        
+        if(res < 0)
+        {
+            APS_LOG("i2c_master_send function err in ap3220_jtouch_white_tp_threshold_reset\n");
+        }
+
+	res = ap3220_i2c_write_reg(0x2A,value_low&0x0003);
+	res = ap3220_i2c_write_reg(0x2B,(value_low>>2)&0x00ff);
+	res = ap3220_i2c_write_reg(0x2C,value_high&0x0003);
+	res = ap3220_i2c_write_reg(0x2D,(value_high>>2)&0x00ff);
+
+	APS_LOG("ap3220_jtouch_white_tp_threshold_reset:value_high=%x,value_low=%x! \n",value_high,value_low);
+}
+
+#ifdef  S9311_WHITE_TP_EXCEPTION_CHECK
+
+static int ap3220_jtouch_white_tp_exception_check_enable_ps(struct i2c_client *client, int enable)
+{
+	struct ap3220_priv *obj = i2c_get_clientdata(client);
+	int res;
+	u8 databuf[1];
+	static u8 databuf_bak[1];
+	static u8 databuf_bak_flag = 0;
+
+        //enable ps and backup reg data
+	if(enable == 1)
+		{
+			APS_LOG("ap3220_enable_ps enable_ps\n");
+			res = ap3220_i2c_read_reg(AP3220_REG_SYS_CONF,&databuf[0]);
+            
+                databuf_bak[0] = databuf[0]; // backup reg data
+            
+			if(res < 0)
+			{
+				APS_ERR("i2c_master_read function err\n");
+				goto ENABLE_PS_EXIT_ERR;
+			}			
+			databuf[0] |= AP3220_SYSTEM_PS_ENABLE;
+			databuf[0] &= AP3220_SYSTEM_DEVICE_MASK;
+			res = ap3220_i2c_write_reg(AP3220_REG_SYS_CONF,databuf[0]);
+			if(res < 0)
+			{
+				APS_ERR("i2c_master_send function err\n");
+				goto ENABLE_PS_EXIT_ERR;
+			}
+			
+			atomic_set(&obj->ps_deb_on, 1);
+			atomic_set(&obj->ps_deb_end, jiffies+atomic_read(&obj->ps_debounce)/(1000/HZ));
+                        APS_LOG("ap3220_enable_ps enable_ps databuf[0]=%x \n",databuf[0]);
+
+                        
+                databuf_bak_flag = 1; // set backup flag
+                        
+		}
+	else{
+			APS_LOG("ap3220_enable_ps disable_ps\n");
+            
+			if( 0 == databuf_bak_flag )
+			{
+				APS_ERR("not backup reg data \n");
+				goto ENABLE_PS_EXIT_ERR;
+			}	
+            
+			res = ap3220_i2c_read_reg(AP3220_REG_SYS_CONF,&databuf[0]);
+			if(res < 0)
+			{
+				APS_ERR("i2c_master_read function err\n");
+				goto ENABLE_PS_EXIT_ERR;
+			}			
+			databuf[0] &= ~AP3220_SYSTEM_PS_ENABLE;
+			databuf[0] &= AP3220_SYSTEM_DEVICE_MASK;			
+			//res = ap3220_i2c_write_reg(AP3220_REG_SYS_CONF,databuf[0]);
+			res = ap3220_i2c_write_reg(AP3220_REG_SYS_CONF,databuf_bak[0]);
+			if(res < 0)
+			{
+				APS_ERR("i2c_master_send function err\n");
+				goto ENABLE_PS_EXIT_ERR;
+			}
+			atomic_set(&obj->ps_deb_on, 0);
+		}
+	
+	return 0;
+	ENABLE_PS_EXIT_ERR:
+	return res;
+}
+
+
+static void ap3220_jtouch_white_tp_threshold_reset_exception_tp(u16 vl_value_high, u16 vl_value_low)
+{
+	u8 data, data2, data3;
+	u16 value_high,value_low;
+	int res =0;
+
+        /******************************
+         same as in cust_alsps.c
+        .ps_threshold_high = 0x240,
+        .ps_threshold_low = 0x230,
+        **********************************/
+	value_high= vl_value_high; // 0x200; // 0x240;
+	value_low= vl_value_low; // 0x1f0; // 0x230;
+
+        
+	atomic_set(&ap3220_obj->ps_thd_val_high, value_high);
+	atomic_set(&ap3220_obj->ps_thd_val_low,  value_low);
+
+
+	res = ap3220_i2c_write_reg(0x2A,value_low&0x0003);
+	res = ap3220_i2c_write_reg(0x2B,(value_low>>2)&0x00ff);
+	res = ap3220_i2c_write_reg(0x2C,value_high&0x0003);
+	res = ap3220_i2c_write_reg(0x2D,(value_high>>2)&0x00ff);
+
+	APS_LOG("ap3220_jtouch_white_tp_threshold_reset_exception_tp:value_high=%x,value_low=%x! \n",value_high,value_low);
+}
+
+
+
+static void ap3220_jtouch_white_tp_check_exception_tp(void)
+{
+    long err = 0;
+    u16 			vl_read_ps = 0;
+    u16 			vl_ps_count = 0;
+    u16 			vl_ps_sun = 0;
+    u16 			vl_ps_data = 0;
+    u16 			vl_index = 0;
+    
+    u16 			vl_base_value= 0;
+    u16 			vl_value_high_offser = 0;
+    u16 			vl_value_low_offser = 0;
+    
+    atomic_t	bak_ps_deb_on;		/*indicates if the debounce is on*/
+    atomic_t	bak_ps_deb_end; 	/*the jiffies representing the end of debounce*/
+    
+
+    if(NULL == ap3220_obj->client)
+    {
+        APS_ERR("ap3220_obj->client == NULL\n"); 
+        return;
+    }
+
+
+    // backup
+    atomic_set(&bak_ps_deb_on, atomic_read(&ap3220_obj->ps_deb_on));
+    atomic_set(&bak_ps_deb_end, atomic_read(&ap3220_obj->ps_deb_end));
+
+    // enable ps and backup reg data
+    if((err = ap3220_jtouch_white_tp_exception_check_enable_ps(ap3220_obj->client, 1)))
+    {
+        APS_ERR("enable ps fail: %ld\n", err); 
+        goto exit_handle;
+    }
+    mdelay(50);
+
+
+    // read ps
+    for(vl_index = 0; vl_index < 4; vl_index++)
+    {
+        if((err = ap3220_read_ps(ap3220_obj->client, &vl_read_ps)))
+        {
+            APS_ERR("enable ps fail: %ld\n", err); 
+            goto exit_handle;
+        }
+        
+        APS_LOG("vl_index=%d, vl_read_ps = %d \n",vl_index, vl_read_ps);
+
+        if(vl_index >=2)
+        {
+            vl_ps_sun += vl_read_ps;
+            
+            vl_ps_count ++;
+        }
+        
+        vl_read_ps = 0;
+        
+        mdelay(30);
+    }
+
+    vl_ps_data = (vl_ps_sun/vl_ps_count);
+
+    APS_LOG("ap3220_jtouch_white_tp_check_exception_tp:vl_ps_data=%x \n",vl_ps_data);
+    
+    
+exit_handle:
+
+    if((err = ap3220_jtouch_white_tp_exception_check_enable_ps(ap3220_obj->client, 0)))
+    {
+        APS_ERR("disable ps fail: %d\n", err); 
+    }
+
+    
+    // exception tp
+    if(vl_ps_data > 0x150)
+    {
+        APS_LOG("jtouch exception tp, set new para \n");
+
+        if(vl_ps_data > 0x3c0)
+        {
+            APS_LOG("read ps data too large, please check the phone, set  vl_ps_data = 0x3c0 \n");
+            vl_ps_data = 0x3c0;
+        }
+        
+        vl_base_value = vl_ps_data;
+        
+        vl_value_high_offser = 0x30;
+        
+        vl_value_low_offser = 0x20;
+        
+        ap3220_jtouch_white_tp_threshold_reset_exception_tp(vl_base_value+vl_value_high_offser, vl_base_value+vl_value_low_offser);
+    }
+
+
+    // restore
+    atomic_set(&ap3220_obj->ps_deb_on, atomic_read(&bak_ps_deb_on));
+    atomic_set(&ap3220_obj->ps_deb_end, atomic_read(&bak_ps_deb_end));
+    
+    
+}
+#endif
+
+
+static void ap3220_read_tp_type(void)
+{
+    
+    char *product_id = NULL;
+
+    APS_LOG("entry ap3220_read_tp_type \n");
+    
+    if(g_tp_tpye_checked)
+    {
+        APS_LOG("tp type already checked in ap3220_read_tp_type\n");
+        return;
+    }
+
+    
+    product_id = synaptics_get_vendor_info();
+    
+
+    if(NULL == product_id)
+    {
+        g_tp_read_error_count++;
+        
+        APS_LOG("read tp type error in ap3220_read_tp_type \n");
+        
+        if(g_tp_read_error_count >= 10)
+        {
+            APS_LOG("g_tp_read_error_count than 10, set g_tp_tpye_checked = 1\n");
+            g_tp_tpye_checked = 1;
+        }
+        
+        return;
+    }
+    
+
+    APS_LOG("tp type product_id = %s \n", product_id);
+    
+    if( 0 == memcmp(product_id, "JTOUCH", 6))
+    {
+        APS_LOG("jtouch white tp, reset ps threshold...\n");
+        ap3220_jtouch_white_tp_threshold_reset();
+        
+        #ifdef  S9311_WHITE_TP_EXCEPTION_CHECK
+        ap3220_jtouch_white_tp_check_exception_tp();
+        #endif
+    }
+
+    g_tp_tpye_checked = 1;
+
+}
+
+
+static void ap3220_tp_tpye_delay_check(struct work_struct *work)
+{
+    APS_LOG("entry ap3220_tp_tpye_delay_check  \n");
+    
+    cancel_delayed_work_sync(&tp_type_check_work);
+    
+    destroy_workqueue(tp_type_check_workqueue);
+    
+    if(g_tp_tpye_checked)
+    {
+        APS_LOG("tp type already checked in ap3220_tp_tpye_delay_check\n");
+        return;
+    }
+
+    ap3220_read_tp_type();
+
+    if(0 ==g_tp_tpye_checked)
+    {
+        APS_LOG("read tp type error in ap3220_tp_tpye_delay_check\n");
+    }
+    else
+    {
+        APS_LOG("read tp type OK in ap3220_tp_tpye_delay_check \n");
+    }
+	
+}
+
+#endif /* S9311_WHITE_TP_CHECK */
 
 
 /*----------------------------------------------------------------------------*/

@@ -75,20 +75,10 @@
 
 #ifdef BUILD_LK
 	#include <platform/mt_gpio.h>
-	#define LCM_PRINT printf
 #elif defined(BUILD_UBOOT)
 	#include <asm/arch/mt_gpio.h>
 #else
-	#include <linux/kernel.h>
 	#include <mach/mt_gpio.h>
-	#define LCM_PRINT printk
-#endif
-#define LCM_DBG
-#if  defined(LCM_DBG)
-#define LCM_DBG(fmt, arg...) \
-	LCM_PRINT("[LCM-ssd0275-DSI] %s (line:%d) :" fmt "\r\n", __func__, __LINE__, ## arg)
-#else
-#define LCM_DBG(fmt, arg...) do {} while (0)
 #endif
 // ---------------------------------------------------------------------------
 //  Local Constants
@@ -96,10 +86,6 @@
 
 #define FRAME_WIDTH  (720)
 #define FRAME_HEIGHT (1280)
-#define ACTIVE_WIDTH  										(66.7)
-#define ACTIVE_HEIGHT 										(120.4)
-#define REGFLAG_DELAY             							0XFE
-#define REGFLAG_END_OF_TABLE      							0xFA   // END OF REGISTERS MARKER
 
 #define LCM_ID_SSD2075 (0x2075)
 
@@ -113,7 +99,6 @@
 
 static unsigned int lcm_esd_test = FALSE;      ///only for ESD test
 
-#define LCM_DEBUG
 // ---------------------------------------------------------------------------
 //  Local Variables
 // ---------------------------------------------------------------------------
@@ -139,85 +124,6 @@ static LCM_UTIL_FUNCS lcm_util = {0};
 
 
 #define   LCM_DSI_CMD_MODE							0
-
-struct LCM_setting_table {
-    unsigned cmd;
-    unsigned char count;
-    unsigned char para_list[64];
-};
-
-static struct LCM_setting_table lcm_sleep_out_setting[] = {
- //    Sleep Out
-	{0x11, 1, {0x00}},
-	{REGFLAG_DELAY, 150, {}},
-
-//  Display ON
-	{0x29, 1, {0x00}},
-	{REGFLAG_DELAY, 20, {}},
-	{REGFLAG_END_OF_TABLE, 0x00, {}}
-	
-};
-
-static struct LCM_setting_table lcm_initialization_setting[] = {
-	{0xE1,	1,	{0xA3}},
-
-	{0xB3,	1,	{0x00}},
-	{0xB6,	4,	{0x16,0x0F,0x00,0x00}},
-	{0xB8,	8,	{0x00,0x06,0x08,0x00,0x07,0x09,0x23,0x04}},
-	{0xB9,	6,	{0x04,0x08,0x22,0xff,0xff,0x0f}},
-	{0xBA,	8,	{0x0e,0x0e,0x10,0x10,0x0a,0x0a,0x0c,0x0c}},
-	{0xBB,	8,	{0xa1,0xa1,0xa1,0xa1,0xa1,0xa1,0xa1,0xa1}},
-	{0xBC,	8,	{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}},
-	{0xBD,	8,	{0x0f,0x0f,0x11,0x11,0x0b,0x0b,0x0d,0x0d}},
-	{0xBE,	8,	{0xa1,0xa1,0xa1,0xa1,0xa1,0xa1,0xa1,0xa1}},
-	{0xBF,	8,	{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}},
-	{0xB1,	3,	{0x16,0x1e,0x12}},
-
-	{0xE0,	5,	{0x01,0x03,0x02,0x00,0x00}},
-
-	{0xD0,	6,	{0x00,0x00,0x10,0x1E,0x22,0x2e}},
-	{0xD1,	5,	{0x26,0x2b,0x23,0x1b,0x0a}},
-	{0xD2,	6,	{0x00,0x00,0x10,0x1E,0x22,0x2e}},
-	{0xD3,	5,	{0x26,0x2b,0x23,0x1b,0x0a}},
-	{0xD4,	6,	{0x00,0x00,0x10,0x1E,0x22,0x2e}},
-	{0xD5,	5,	{0x26,0x2b,0x23,0x1b,0x0a}},
-	{0xD6,	6,	{0x00,0x00,0x10,0x1E,0x22,0x2e}},
-	{0xD7,	5,	{0x26,0x2b,0x23,0x1b,0x0a}},
-	{0xD8,	6,	{0x00,0x00,0x10,0x1E,0x22,0x2e}},
-	{0xD9,	5,	{0x26,0x2b,0x23,0x1b,0x0a}},
-	{0xDA,	6,	{0x00,0x00,0x10,0x1E,0x22,0x2e}},
-	{0xDB,	5,	{0x26,0x2b,0x23,0x1b,0x0a}},
-
-	{0x70,	4,	{0xd8,0x00,0xff,0x80}},
-	{0xFF,	1,	{0x01}},
-
-	//diff with truly{0xEC	1,	{0x12}},
-	{0xC6,	2,	{0x99,0x33}},
-	{0xDE,	2,	{0x9d,0x30}},
-	{0x14,	1,	{0x00}},
-	//diff with truly
-
-	{0xE9,	1,	{0x07}},
-	{0xED,	2,	{0x60,0x10}},
-	{0xEC,	1,	{0x12}},
-
-	{0xCD,	4,	{0x77,0x7B,0x34,0x08}},
-	{0xC3,	7,	{0x03,0x05,0x34,0x05,0x01,0x44,0x54}},
-	{0xC4,	5,	{0x02,0x03,0x58,0x58,0x5a}},
-	{0xCB,	3,	{0xdf,0x80,0x00}},
-
-	{0xEA,	2,	{0x15,0x28}},
-	{0xF0,	4,	{0x38,0x00,0x00,0x00}},
-	{0xC9,	3,	{0x60,0x00,0x82}},
-	{0xB5,	8,	{0x00,0x05,0x05,0x1e,0x04,0x40,0x20,0xfc}},
-
-	{0x36,	1,	{0x08}},
-
-	{0x11,	0,	{0x00}},
-	{0x29,	0,	{0x00}},
-	{0xF0,	4,	{0x18,0xff,0xff,0x00}},
-};
-
 
 
 static void init_lcm_registers(void)
@@ -423,6 +329,13 @@ static void init_lcm_registers(void)
 //legen modify end							//diff with truly    lishengli   20121213  end
 #endif
 
+	//data_array[0] = 0x00053902;                          
+    //data_array[1] = 0x1C2E1CF6; 
+    //data_array[2] = 0x0000002C; 	
+    //dsi_set_cmdq(data_array, 3, 1);
+
+
+	
 	data_array[0] = 0x00023902;                          
     data_array[1] = 0x000007E9;                 
     dsi_set_cmdq(data_array, 2, 1); 
@@ -456,10 +369,117 @@ static void init_lcm_registers(void)
     dsi_set_cmdq(data_array, 3, 1);
 	//MDELAY(1);
 
+    #if 0
+    //no need to config 0xDE register
+    data_array[0] = 0x00073902;                          
+    data_array[1] = 0xD4CF95DE; 
+	data_array[2] = 0x00100F10; 
+    dsi_set_cmdq(&data_array, 3, 1);
+	#endif
     
-	
+	//MDELAY(1);
+
+	//MDELAY(1);
+ 
+	//MDELAY(1);
+
 	data_array[0] = 0x00043902;                          
+	//MDELAY(1);
+
+	//MDELAY(1);
+
+
+    //1 Do not delete 0x11, 0x29 here
+	
+	//MDELAY(1);
+	
+	//MDELAY(1);
+
+	
+    //MDELAY(1);
 	 
+    //MDELAY(1);
+	 
+    //MDELAY(1);
+	 
+	//MDELAY(1);
+	
+	//MDELAY(1);
+
+	
+	//MDELAY(1);
+
+	//MDELAY(1);
+
+	 
+	//MDELAY(1);
+
+	
+	//MDELAY(1);
+
+	
+	//MDELAY(1);
+
+	
+	//MDELAY(1);
+
+	
+	//MDELAY(1);
+
+	
+	//MDELAY(1);
+
+	
+	//MDELAY(1);
+
+	
+	//MDELAY(1);
+
+	
+	//MDELAY(1);
+
+	
+	//MDELAY(1);
+
+	//MDELAY(1);
+
+	//MDELAY(1);
+
+	//MDELAY(1);
+
+	//MDELAY(1);
+
+	//MDELAY(1);
+ 
+	//MDELAY(1);
+
+	//MDELAY(1);
+
+											//diff with truly    lishengli   20121213  begin  
+// add cmd-c6 
+//add end
+
+//legen modify 
+	//data_array[2] = 0x00130D0C; 
+
+
+	//data_array[2] = 0x00130D0C; 
+//legen modify end							//diff with truly    lishengli   20121213  end
+
+
+
+	//MDELAY(1);
+
+	//MDELAY(1);
+ 
+	//MDELAY(1);
+ 
+	//MDELAY(1);
+
+	//MDELAY(1);
+
+    //no need to config 0xDE register
+    
 	data_array[1] = 0x0080DFCB;   //0x0080DACB     //line<20130109>wangyanhui           
     dsi_set_cmdq(data_array, 2, 1); 
 	//MDELAY(1);
@@ -507,90 +527,6 @@ static void init_lcm_registers(void)
 }
 
 
-//edit by Magnum 2012-12-18
-static void dsi_send_cmdq_tinno(unsigned cmd, unsigned char count, unsigned 
-char *para_list, unsigned char force_update)
-{
-	unsigned int item[16];
-	unsigned char dsi_cmd = (unsigned char)cmd;
-	unsigned char dc;
-	int index = 0, length = 0;
-	
-	memset(item,0,sizeof(item));
-	if(count+1 > 60)
-	{
-		LCM_DBG("Exceed 16 entry\n");
-		return;
-	}
-/*
-	Data ID will depends on the following rule.
-	
-		count of parameters > 1	=> Data ID = 0x39
-		count of parameters = 1	=> Data ID = 0x15
-		count of parameters = 0	=> Data ID = 0x05
-*/	
-	if(count == 0)
-	{
-		item[0] = 0x0500 | (dsi_cmd<<16);
-		length = 1;
-	}
-	else if(count == 1)
-	{
-		item[0] = 0x1500 | (dsi_cmd<<16) | (para_list[0]<<24);
-		length = 1;
-	}
-	else
-	{
-		item[0] = 0x3902 | ((count+1)<<16);//Count include command.
-		++length;
-		while(1)
-		{
-			if (index == count+1)
-				break;
-			if ( 0 == index ){
-				dc = cmd;
-			}else{
-				dc = para_list[index-1];
-			}
-			// an item make up of 4data. 
-			item[index/4+1] |= (dc<<(8*(index%4)));  
-			if ( index%4 == 0 ) ++length;
-			++index;
-		}
-	}
-	
-	dsi_set_cmdq(&item, length, force_update);
-
-}
-
-
-static void push_table(struct LCM_setting_table *table, unsigned int count, unsigned char force_update)
-{
-	unsigned int i;
-
-    for(i = 0; i < count; i++) {
-		
-        unsigned cmd;
-        cmd = table[i].cmd;
-		
-        switch (cmd) {
-			
-            case REGFLAG_DELAY :
-                MDELAY(table[i].count);
-                break;
-				
-            case REGFLAG_END_OF_TABLE :
-                break;
-				
-            default:
-				dsi_send_cmdq_tinno(cmd, table[i].count, table[i].para_list, force_update);
-		//	dsi_set_cmdq_V2(cmd, table[i].count, table[i].para_list, force_update);
-       	}
-    }
-	
-}
-
-
 // ---------------------------------------------------------------------------
 //  LCM Driver Implementations
 // ---------------------------------------------------------------------------
@@ -609,9 +545,6 @@ static void lcm_get_params(LCM_PARAMS *params)
 
 		params->width  = FRAME_WIDTH;
 		params->height = FRAME_HEIGHT;
-		params->active_width= ACTIVE_WIDTH;
-		params->active_height= ACTIVE_HEIGHT;
-
 
        //1 SSD2075 has no TE Pin
 		// enable tearing-free
@@ -662,16 +595,15 @@ static void lcm_get_params(LCM_PARAMS *params)
 		params->dsi.HS_PRPR=3;
 		params->dsi.CLK_HS_POST = 22;
 		params->dsi.DA_HS_EXIT =35;
-	    	//params->dsi.LPX=8; 
+	    	params->dsi.LPX=13; 
 		//params->dsi.HS_PRPR=5;
 		//params->dsi.HS_TRAIL=13;
 
 		// Bit rate calculation
 		//1 Every lane speed
-//		params->dsi.pll_div1=0;		// div1=0,1,2,3;div1_real=1,2,4,4 ----0: 546Mbps  1:273Mbps
-//		params->dsi.pll_div2=1;		// div2=0,1,2,3;div1_real=1,2,4,4	
-//		params->dsi.fbk_div =19;    // fref=26MHz, fvco=fref*(fbk_div+1)*2/(div1_real*div2_real)	
-		params->dsi.PLL_CLOCK = LCM_DSI_6589_PLL_CLOCK_214_5;
+		params->dsi.pll_div1=0;		// div1=0,1,2,3;div1_real=1,2,4,4 ----0: 546Mbps  1:273Mbps
+		params->dsi.pll_div2=1;		// div2=0,1,2,3;div1_real=1,2,4,4	
+		params->dsi.fbk_div =19;    // fref=26MHz, fvco=fref*(fbk_div+1)*2/(div1_real*div2_real)	
 
 		params->dsi.noncont_clock = TRUE;
 		params->dsi.noncont_clock_period = 2;	// Unit : frames
@@ -688,8 +620,7 @@ static void lcm_init(void)
 	SET_RESET_PIN(1);
 	MDELAY(80);    // >60ms      
 
-	//init_lcm_registers();
-	push_table(lcm_initialization_setting, sizeof(lcm_initialization_setting) / sizeof(struct LCM_setting_table), 1);
+	init_lcm_registers();
 
 }
 
@@ -788,11 +719,13 @@ static unsigned int lcm_compare_id(void)
 	unsigned char buffer[2];
 	unsigned int array[16];  
 
-    SET_RESET_PIN(1);
-    SET_RESET_PIN(0);
-    MDELAY(1);
-    SET_RESET_PIN(1);
-    MDELAY(10);
+	SET_RESET_PIN(1);
+   	MDELAY(2);   // > 1ms
+	SET_RESET_PIN(0);
+	MDELAY(40); // >30ms
+	
+	SET_RESET_PIN(1);
+	MDELAY(80);  // >60ma     
 
 	array[0] = 0x00023700;// return byte number
 	dsi_set_cmdq(&array, 1, 1);
@@ -813,7 +746,7 @@ static unsigned int lcm_compare_id(void)
 	printk("%s, Kernel ssd2075 id = 0x%08x\n", __func__, id);
    #endif
 
-  return (LCM_ID_SSD2075 == id)?1:1;
+  return (LCM_ID_SSD2075 == id)?1:0;
 
 
 }
@@ -826,21 +759,54 @@ static unsigned int lcm_esd_check(void)
       char  buffer[4] = {0xff, 0xff, 0xff , 0xff};
       int   array[4];
 
-      printk("[DISP] lcm_esd_check  ");
+     // printk(" lcm_esd_check  ");
 
       if(lcm_esd_test)
        {
            lcm_esd_test = FALSE;
            return TRUE;
         }
+#if 0
+        array[0] = 0x00083700;// read id return two byte,version and id
+        dsi_set_cmdq(array, 1, 1);
+        read_reg_v2(0xb2, buffer, 2);
+        printk("    0xb2 buffer[0] = %x  ,buffer[1] = %x \n",buffer[0],buffer[1]);
+		
+       
+
+        array[0] = 0x00083700;// read id return two byte,version and id
+        dsi_set_cmdq(array, 1, 1);
+
+        read_reg_v2(0x54, buffer, 1);
+        printk(" lcm_esd_check  0x54  buffer[0] = %x  \n",buffer[0]);
+
+
+
+        array[0] = 0x00083700;// read id return two byte,version and id
+        dsi_set_cmdq(array, 1, 1);
+        read_reg_v2(0x5f, buffer, 1);
+        printk("  0x5f  buffer[0] = %x  \n",buffer[0]);
+		
+
+
+        array[0] = 0x00083700;// read id return two byte,version and id
+        dsi_set_cmdq(array, 1, 1);
+        read_reg_v2(0xc8, buffer, 2);
+        printk("   0xc8  buffer[0] = %x  ,buffer[1] = %x \n",buffer[0],buffer[1]);
+
+        array[0] = 0x00083700;// read id return two byte,version and id
+        dsi_set_cmdq(array, 1, 1);
+        read_reg_v2(0xed, buffer, 2);
+        printk("  0xed buffer[0] = %x  ,buffer[1] = %x \n",buffer[0],buffer[1]);
+
+#endif
 
         array[0] = 0x00083700;// read id return two byte,version and id
         dsi_set_cmdq(array, 1, 1);
 
         read_reg_v2(0xF5, buffer, 3);
-        printk(" [DISP] lcm_esd_check   buffer[0] = 0x%x  ,buffer[1] = 0x%x,buffer[2] = 0x%x \n",buffer[0],buffer[1],buffer[2]);
+        printk(" lcm_esd_check   buffer[0] = %d  ,buffer[1] = %d,buffer[2] = %d \n",buffer[0],buffer[1],buffer[2]);
 
-        
         if(((buffer[0]&0xff)==0) && ((buffer[1]&0xf0) ==0)&&((buffer[2]&0x0f)== 0))
         {
                 return FALSE;
@@ -863,163 +829,6 @@ static unsigned int lcm_esd_recover(void)
 }
 #endif
 
-#ifdef LCM_DEBUG
-char * magnum_strsep(char **s, const char *ct)
-{
-	char *sbegin = *s, *end;
-
-	if (sbegin == NULL)
-		return NULL;
-
-	end = strpbrk(sbegin, ct);
-	if (end)
-		*end++ = '\0';
-	*s = end;
-
-	return sbegin;
-}
-static struct LCM_setting_table  lcm_debug_params[100];
-static int register_count = 0;
-static char  tempbuf[100][500];
-
-//just for register and, register length is 2
-static int ver_2_num(char* ver)
-{
-	LCM_DBG("ver ====== %s",ver);
-    unsigned long var=0;
-    unsigned long t;
-    int len = strlen(ver);
-//	LCM_DBG("data length %d",len);
-    if (var > 8) //\u93c8\u20ac\u95c0?\u6d63?
- 	 return -1;
-	 int i = 0;
-	//for (i; i!=2; i++)
-	for (i; ver[i] !='\0'; i++)
-	 {
-	     if(i==2)
-		 	break;
-	 	 if (ver[i]>='a' && ver[i] <='f')
-		   t = ver[i]-87;
-	 	 else if (ver[i]>='A' && ver[i] <='F')
-		   t = ver[i]-55;
-		 else if(ver[i] < 47)
-		  	 continue;
-	 	 else
-	 	 t = ver[i]-48;
-//		 LCM_DBG("t ====== %x",t);
-	 	 var<<=4;
-	  	 var|=t;
-     }
-	return var; 
-}
-
-static void GetDebugInfo(char * cmd, char * data,int reg_count)
-{
-	unsigned tempcmd = ver_2_num(cmd);
-	int data_count = 0;
-	lcm_debug_params[reg_count].cmd = tempcmd;
-	char *p = NULL;
-	char delim2[] = ",";
-	//p = magnum_strsep(&data,delim2);   // split to  para_list
-	LCM_DBG("data  = %s",data);
-	 unsigned int datatemp;
-	 while((p=magnum_strsep(&data,delim2))){
-	 	     datatemp = ver_2_num(p);
-			 LCM_DBG("data temp = %x",datatemp);
-	        lcm_debug_params[reg_count].para_list[data_count] = datatemp;
-        	data_count++;	
-        }
-      
-    lcm_debug_params[reg_count].count = data_count;
-   	LCM_DBG("[Magnum] GetDebugInfo...cmd=%x, count = %d \n",lcm_debug_params[reg_count].cmd,lcm_debug_params[reg_count].count);
-	int j = 0;
-	while(j!= data_count){
-		LCM_DBG("para_list=%x\n",lcm_debug_params[reg_count].para_list[j]);
-		j++;
-	}
-	LCM_DBG("\n");
-	
-}
-static void handle_lcm_debug_buff(char * buf)
-{
-
-	LCM_DBG("[MAGNUM]get lcm debug buffer == %s \n",buf);
-	int length = strlen(buf);
-	if(length <= 0){
-		LCM_DBG("RETURN .............. \n");
-		return;
-		}
-	char delim[]="+";
-    char *p=NULL;
-    char *p1=NULL;
-    char * pCmd = NULL;
-	char * pData = NULL;
-	char delim1[]=";";
-	
-	//p = magnum_strsep(&buf,delim);   // split to  LCM_setting_table
-//	 while(NULL != (p=magnum_strsep(&buf,delim))){
-	while(p=magnum_strsep(&buf,delim)){
-        	strcpy(tempbuf[register_count],p);
-        //	tempbuf[register_count] = p;
-        	LCM_DBG("tempbuf == %s\n",tempbuf[register_count]);
-        	register_count++;	
-        }	
-	LCM_DBG("register_count ==[%d]\n",register_count);
-    int i = 0;
-    for( i;i<register_count;i++)
-    {
-		p1 = tempbuf[i];
-		pCmd = magnum_strsep(&p1,delim1); // split to cmd & data;
-		LCM_DBG("lcm_debug_params[%d]: ",i);
-		LCM_DBG("cmd == %s  && ",pCmd);
-		pData=magnum_strsep(&p1,delim1);
-		LCM_DBG("data == %s && length ==%d\n",pData,strlen(pData));
-		GetDebugInfo(pCmd,pData,i);
-    }
-//	lcm_debug_params[register_count].cmd = 255;
- //   lcm_debug_params[register_count].count = 0;
-   // lcm_debug_params[register_count].count
-   i = 0;
- //  while(++i < (register_count +1))
-   while(++i < (register_count ))
-   {
-   		LCM_DBG("lcm_debug_params[%d]: ",i);
-		LCM_DBG("cmd == %x  && ",lcm_debug_params[i].cmd);
-		LCM_DBG("count == %d  && ",lcm_debug_params[i].count);
-		char * para = lcm_debug_params[i].para_list;
-		LCM_DBG("data == ");
-		int j = 0;
-		while(j!= lcm_debug_params[i].count){
-			LCM_DBG(" %x ,",lcm_debug_params[i].para_list[j]);
-			j++;
-		}
-		LCM_DBG("\n");
-   }
-	
-}
-
-static void lcm_debug(char * buf)
-{
-	//edit by Magnum 2012-11-1
-	//static struct LCM_setting_table  lcm_debug_params[];
-	     //  lcm_debug[0] = {cmd ,count,};
-	//     lcm_debug_params[0].cmd = cmd;
-	//	 lcm_debug_params[0].count = count;
-	//	 strcpy(lcm_debug_params[0].para_list,para_list);
-	//char * p = strdup(buf);
-	LCM_DBG("[Magnum] lcm_debug %s\n",buf);
-//	if(enableCE(buf))
-	//	return;
-	handle_lcm_debug_buff(buf);
-	
-	push_table(lcm_debug_params, register_count, 1);
-	register_count = 0;
-	memset(lcm_debug_params,0,sizeof(lcm_debug_params) / sizeof(struct LCM_setting_table));
-	LCM_DBG("[Magnum] lcm_debug %x\n",lcm_debug_params[0].cmd);
-}
-#endif
-
-
 LCM_DRIVER ssd2075_hd720_dsi_vdo_truly_lcm_drv = 
 {
     .name			= "ssd2075_hd720_dsi_vdo_truly",
@@ -1029,12 +838,9 @@ LCM_DRIVER ssd2075_hd720_dsi_vdo_truly_lcm_drv =
 	.suspend        = lcm_suspend,
 	.resume         = lcm_resume,
 	.compare_id    = lcm_compare_id,
-//	.esd_check = lcm_esd_check,
-//	.esd_recover = lcm_esd_recover,
+	.esd_check = lcm_esd_check,
+	.esd_recover = lcm_esd_recover,
     #if (LCM_DSI_CMD_MODE)
     .update         = lcm_update,
-    #endif
-    #ifdef LCM_DEBUG
-	.m_debug	        = lcm_debug,
     #endif
     };

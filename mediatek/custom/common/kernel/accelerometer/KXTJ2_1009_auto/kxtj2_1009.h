@@ -56,6 +56,7 @@
  */
 #ifndef KXTJ2_1009_H
 #define KXTJ2_1009_H
+extern struct acc_hw* kxtj2_get_cust_acc_hw(void) ;
 	 
 #include <linux/ioctl.h>
 	 

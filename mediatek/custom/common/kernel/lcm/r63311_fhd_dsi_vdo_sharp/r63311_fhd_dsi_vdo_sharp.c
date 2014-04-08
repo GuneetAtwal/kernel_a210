@@ -75,10 +75,12 @@
 
 #ifdef BUILD_LK
 	#include <platform/mt_gpio.h>
+    #include <platform/mt_pmic.h>
 #elif defined(BUILD_UBOOT)
 	#include <asm/arch/mt_gpio.h>
 #else
 	#include <mach/mt_gpio.h>
+    #include <mach/mt_pm_ldo.h>
 #endif
 // ---------------------------------------------------------------------------
 //  Local Constants
@@ -87,7 +89,7 @@
 #define FRAME_WIDTH  (1080)
 #define FRAME_HEIGHT (1920)
 
-#define LCM_ID_NT35590 (0x90)
+#define LCM_ID_R63311 (0x90)
 
 // ---------------------------------------------------------------------------
 //  Local Variables
@@ -95,7 +97,18 @@
 
 static LCM_UTIL_FUNCS lcm_util = {0};
 
-#define SET_RESET_PIN(v)    (lcm_util.set_reset_pin((v)))
+//#define SET_RESET_PIN(v)    								(lcm_util.set_reset_pin((v)))
+
+
+#define SET_RESET_PIN(v)   	\
+do { \
+	mt_set_gpio_mode(GPIO131,GPIO_MODE_00);	\
+	mt_set_gpio_dir(GPIO131,GPIO_DIR_OUT);		\
+	if(v)											\
+		mt_set_gpio_out(GPIO131,GPIO_OUT_ONE);	\
+	else											\
+		mt_set_gpio_out(GPIO131,GPIO_OUT_ZERO); \
+} while (0)
 
 #define UDELAY(n) (lcm_util.udelay(n))
 #define MDELAY(n) (lcm_util.mdelay(n))
@@ -115,6 +128,54 @@ static LCM_UTIL_FUNCS lcm_util = {0};
 
 #define   LCM_DSI_CMD_MODE							0
 
+#define LCM_EN_PIN  168
+
+#if 0
+static unsigned char  lcm_initialization_setting[LCM_INIT_TABLE_SIZE_MAX] = {
+	
+	0xB0, 1, 0x04,
+	//TE
+	0x35, 1, 0x00,
+    // Display ON
+	0x29, 0,
+	0x11, 0,
+	REGFLAG_DELAY, 120,
+
+	REGFLAG_END_OF_TABLE
+};
+
+static int push_table(unsigned char table[])
+{
+	unsigned int i, bExit = 0;
+	unsigned char *p = (unsigned char *)table;
+	LCM_SETTING_ITEM *pSetting_item;
+
+	while(!bExit) {
+		pSetting_item = (LCM_SETTING_ITEM *)p;
+
+		switch (pSetting_item->cmd) {
+			
+		case REGFLAG_DELAY :
+			MDELAY(pSetting_item->count);
+			p += 2;
+		break;
+
+		case REGFLAG_END_OF_TABLE :
+			p += 2;
+			bExit = 1;
+		break;
+
+		default:
+			dsi_set_cmdq_V2(pSetting_item->cmd, 
+							pSetting_item->count, pSetting_item->params, 1);
+//			MDELAY(1);
+			p += pSetting_item->count + 2;
+		break;
+		}
+	}
+	return p - table; //return the size of  settings array.
+}
+#endif
 
 static void init_lcm_registers(void)
 {
@@ -161,7 +222,7 @@ static void lcm_get_params(LCM_PARAMS *params)
         #if (LCM_DSI_CMD_MODE)
 		params->dsi.mode   = CMD_MODE;
         #else
-		params->dsi.mode   = BURST_VDO_MODE;
+		params->dsi.mode   = SYNC_EVENT_VDO_MODE; // BURST_VDO_MODE;
         #endif
 	
 		// DSI
@@ -187,62 +248,172 @@ static void lcm_get_params(LCM_PARAMS *params)
 		
 		params->dsi.vertical_sync_active				= 1;
 		params->dsi.vertical_backporch					= 4;
-		params->dsi.vertical_frontporch					= 2;
+		params->dsi.vertical_frontporch 				= 2;
 		params->dsi.vertical_active_line				= FRAME_HEIGHT; 
 
-		params->dsi.horizontal_sync_active				= 50;
-		params->dsi.horizontal_backporch				= 100;
-		params->dsi.horizontal_frontporch				= 80;
+		params->dsi.horizontal_sync_active				= 3; // 50;
+		params->dsi.horizontal_backporch				= 45; // 100;
+		params->dsi.horizontal_frontporch				= 75; // 80;
 		params->dsi.horizontal_active_pixel				= FRAME_WIDTH;
-
+		params->dsi.pll_select=1;	//0: MIPI_PLL; 1: LVDS_PLL
 		// Bit rate calculation
 		//1 Every lane speed
 		params->dsi.pll_div1=0;		// div1=0,1,2,3;div1_real=1,2,4,4 ----0: 546Mbps  1:273Mbps
 		params->dsi.pll_div2=0;		// div2=0,1,2,3;div1_real=1,2,4,4	
 		params->dsi.fbk_div =0x12;    // fref=26MHz, fvco=fref*(fbk_div+1)*2/(div1_real*div2_real)	
 
+//Tinno:CJ FAQ08220
+#if 1 
+/*
+		params->dsi.vertical_sync_active  = 1;
+		params->dsi.vertical_backporch	= 4;
+		params->dsi.vertical_frontporch  = 3; 
+		params->dsi.horizontal_sync_active	= 3;
+		params->dsi.horizontal_backporch	= 60;
+		params->dsi.horizontal_frontporch	= 94;
+*/
+		params->dsi.PLL_CLOCK = LCM_DSI_6589_PLL_CLOCK_357_5;
+#endif
+
+}
+
+static void lcm_contrl(int status)
+{
+    if(status)
+    {
+    //VGP6 1.8V
+    #ifdef BUILD_LK
+        pmic_config_interface( (U32)(DIGLDO_CON33),
+                             (U32)(3),
+                             (U32)(PMIC_RG_VGP6_VOSEL_MASK),
+                             (U32)(PMIC_RG_VGP6_VOSEL_SHIFT)
+	                         );
+        pmic_config_interface( (U32)(DIGLDO_CON12),
+                             (U32)(1),
+                             (U32)(PMIC_RG_VGP6_EN_MASK),
+                             (U32)(PMIC_RG_VGP6_EN_SHIFT)
+	                         ); 
+    #else
+        hwPowerOn(MT65XX_POWER_LDO_VGP6, VOL_1800, "LCM");
+    #endif
+
+        MDELAY(5);    
+
+        mt_set_gpio_mode(LCM_EN_PIN, 0);
+        mt_set_gpio_dir(LCM_EN_PIN, GPIO_DIR_OUT);
+        mt_set_gpio_out(LCM_EN_PIN, status);
+    }
+    else
+    {
+        mt_set_gpio_mode(LCM_EN_PIN, 0);
+        mt_set_gpio_dir(LCM_EN_PIN, GPIO_DIR_OUT);
+        mt_set_gpio_out(LCM_EN_PIN, status);
+
+        MDELAY(110);    
+
+    //VGP6 1.8V
+    #ifdef BUILD_LK
+        //hwPowerDown(MT65XX_POWER_LDO_VGP6, "LCM");
+        /*
+        pmic_config_interface( (U32)(DIGLDO_CON33),
+                             (U32)(0x00),
+                             (U32)(PMIC_RG_VGP6_VOSEL_MASK),
+                             (U32)(PMIC_RG_VGP6_VOSEL_SHIFT)
+	                         );
+	                         */
+        pmic_config_interface( (U32)(DIGLDO_CON12),
+                             (U32)(0x00),
+                             (U32)(PMIC_RG_VGP6_EN_MASK),
+                             (U32)(PMIC_RG_VGP6_EN_SHIFT)
+	                         ); 
+    #else
+        hwPowerDown(MT65XX_POWER_LDO_VGP6, "LCM");
+    #endif
+    }
+
 }
 
 static void lcm_init(void)
 {
-
-	SET_RESET_PIN(1);
 	SET_RESET_PIN(0);
 	MDELAY(1);
-	
+			
+    
+	lcm_contrl(1);  
+	MDELAY(10);      //need 1ms
+	           	
 	SET_RESET_PIN(1);
-	MDELAY(20);      
+	MDELAY(10);  		//need 10ms    
 
 	init_lcm_registers();
+	//push_table(lcm_initialization_setting);
 }
 
-
-
-static void lcm_suspend(void)
+static void lcm_earlysuspendsharp(void)
 {
 	unsigned int data_array[16];
-
+	
 	data_array[0]=0x00280500; // Display Off
 	dsi_set_cmdq(data_array, 1, 1);
 	
+	MDELAY(20);		//need 20ms
+		
 	data_array[0] = 0x00100500; // Sleep In
 	dsi_set_cmdq(data_array, 1, 1);
+	
+	MDELAY(120);			//need 4 frame time*/
+}
 
-	MDELAY(120);
+
+static int lk_vgp6_power_flag = 1;
+static void lcm_suspend(void)
+{
+	//unsigned int data_array[16];
+
+#ifdef BUILD_LK
+    //
+#else
+    if(1 == lk_vgp6_power_flag )
+    {
+        lk_vgp6_power_flag = 0;
+        
+        if(TRUE != hwPowerOn(MT65XX_POWER_LDO_VGP6, VOL_1800, "LCM"))
+        {
+            printk("%s, Fail to enable digital power\n", __func__);
+        }
+    }
+#endif
+    
+	//data_array[0]=0x00280500; // Display Off
+	//dsi_set_cmdq(data_array, 1, 1);
+	
+	//MDELAY(1);
+    
+	//data_array[0] = 0x00100500; // Sleep In
+	//dsi_set_cmdq(data_array, 1, 1);
+
+	//MDELAY(10);
+	
+	MDELAY(1);
+
 	SET_RESET_PIN(0);
+	MDELAY(1);
+
+       lcm_contrl(0);
+        
 }
 
 
 static void lcm_resume(void)
 {
-	unsigned int data_array[16];
+	//unsigned int data_array[16];
 	lcm_init();
 
-	data_array[0] = 0x00290500; // Display On
-	dsi_set_cmdq(data_array, 1, 1);
+	//data_array[0] = 0x00290500; // Display On
+	//dsi_set_cmdq(data_array, 1, 1);
 
-	data_array[0] = 0x00110500; // Sleep Out
-	dsi_set_cmdq(data_array, 1, 1);
+	//data_array[0] = 0x00110500; // Sleep Out
+	//dsi_set_cmdq(data_array, 1, 1);
 
 }
          
@@ -309,12 +480,32 @@ static unsigned int lcm_compare_id(void)
 		printk("%s, kernel nt35590 horse debug: nt35590 id = 0x%08x\n", __func__, id);
     #endif
 
-    if(id == LCM_ID_NT35590)
+    if(id == LCM_ID_R63311)
     	return 1;
     else
         return 0;
 
 
+}
+#endif
+
+#if 0 // !defined(BUILD_UBOOT) && !defined(BUILD_LK)
+static int get_initialization_settings(unsigned char table[])
+{
+	memcpy(table, lcm_initialization_setting, sizeof(lcm_initialization_setting));
+	return sizeof(lcm_initialization_setting);
+}
+	
+static int set_initialization_settings(const unsigned char table[], const int count)
+{
+	if ( count > LCM_INIT_TABLE_SIZE_MAX ){
+		return -EIO;
+	}
+	memset(lcm_initialization_setting, REGFLAG_END_OF_TABLE, sizeof(lcm_initialization_setting));
+	memcpy(lcm_initialization_setting, table, count);
+
+	lcm_init();
+	return count;
 }
 #endif
 
@@ -330,4 +521,11 @@ LCM_DRIVER r63311_fhd_dsi_vdo_sharp_lcm_drv =
 #if (LCM_DSI_CMD_MODE)
     .update         = lcm_update,
 #endif
+
+#if 0 // !defined(BUILD_UBOOT) && !defined(BUILD_LK)
+    .get_initialization_settings = get_initialization_settings,
+    .set_initialization_settings = set_initialization_settings,
+#endif
+
+		.earlysuspendsharp = lcm_earlysuspendsharp,
     };

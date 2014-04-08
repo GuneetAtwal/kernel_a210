@@ -291,7 +291,8 @@ static void lcm_get_params(LCM_PARAMS *params)
 		params->dsi.data_format.format      = LCM_DSI_FORMAT_RGB888;
 
 		params->dsi.PS=LCM_PACKED_PS_24BIT_RGB888;
-
+		
+		params->dsi.pll_select=1;	//0: MIPI_PLL; 1: LVDS_PLL
 		// Bit rate calculation, calculation forma be different to mt657x
 
 		params->dsi.pll_div1=0;		// div1=0,1,2,3;div1_real=1,2,4,4

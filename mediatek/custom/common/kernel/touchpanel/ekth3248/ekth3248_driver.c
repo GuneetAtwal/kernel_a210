@@ -351,11 +351,11 @@ int is_OldBootCode = 0; // 0:new 1:old
 
 
 /*The newest firmware, if update must be changed here*/
-#if 1
-static const uint8_t file_fw_data_array[] = {
+#if 0
+static uint8_t file_fw_data[] = {
 #include "fw_data.i"
 };
-
+#else
 static uint8_t *file_fw_data = NULL;
 static int file_fw_data_len = 0;
 #endif
@@ -942,17 +942,17 @@ IAP_RESTART:
 	res = EnterISPMode(private_ts->client, isp_cmd);	 //enter ISP mode //Kenny
 	
       res = i2c_master_recv(private_ts->client, recovery_buffer, 4); //55 aa 33 cc //Kenny
-      printk("[ELAN] recovery_buffer:%x,%x, %x, %x",recovery_buffer[0], recovery_buffer[1], recovery_buffer[2], recovery_buffer[3]);
+      CTP_DBG("[ELAN] recovery_buffer:%x,%x, %x, %x",recovery_buffer[0], recovery_buffer[1], recovery_buffer[2], recovery_buffer[3]);
 
 #if 0 	//Kenny
 	if(recovery != 0x80)
 	{
-		printk("[ELAN] Firmware upgrade normal mode !\n");	
+		CTP_DBG("[ELAN] Firmware upgrade normal mode !\n");	
 
 		res = EnterISPMode(private_ts->client, isp_cmd);	 //enter ISP mode
        }else{
-                printk("[ELAN] Firmware upgrade recovery mode !\n");
-                printk("[ELAN] recovery byte data:%x,%x,%x,%x \n",recovery_buffer[0],recovery_buffer[1],recovery_buffer[2],recovery_buffer[3]);	
+                CTP_DBG("[ELAN] Firmware upgrade recovery mode !\n");
+                CTP_DBG("[ELAN] recovery byte data:%x,%x,%x,%x \n",recovery_buffer[0],recovery_buffer[1],recovery_buffer[2],recovery_buffer[3]);	
         }
       mdelay(10); 
 
@@ -969,26 +969,26 @@ IAP_RESTART:
 			checkCnt ++;
 			if (checkCnt >= 5)
 			{
-				printk("[ELAN] ERROR: CheckIapMode %d times fails!\n", IAPRESTART);
+				CTP_DBG("[ELAN] ERROR: CheckIapMode %d times fails!\n", IAPRESTART);
 				return E_FD;
 			}
 			else
 			{
-				printk("[ELAN] CheckIapMode retry %dth times! And restart IAP~~~\n\n", checkCnt);
+				CTP_DBG("[ELAN] CheckIapMode retry %dth times! And restart IAP~~~\n\n", checkCnt);
 				goto IAP_RESTART;
 			}
 		}
 		else
-			printk("[ELAN]  CheckIapMode ok!\n");
+			CTP_DBG("[ELAN]  CheckIapMode ok!\n");
 #endif
 	// Send Dummy Byte	
 //	mdelay(20); //Kenny
  	mdelay(10);//Kenny
-	printk("[ELAN] send one byte data:%x,%x",private_ts->client->addr,data);
+	CTP_DBG("[ELAN] send one byte data:%x,%x",private_ts->client->addr,data);
 	res = i2c_master_send(private_ts->client, &data,  sizeof(data));
 	if(res!=sizeof(data))
 	{
-		printk("[ELAN] dummy error code = %d\n",res);
+		CTP_DBG("[ELAN] dummy error code = %d\n",res);
 	}	
 	mdelay(50);
 
@@ -1004,8 +1004,8 @@ PAGE_REWRITE:
 		{
 			if(byte_count!=17)
 			{		
-	//			printk("[ELAN] byte %d\n",byte_count);	
-	//			printk("curIndex =%d\n",curIndex);
+	//			CTP_DBG("[ELAN] byte %d\n",byte_count);	
+	//			CTP_DBG("curIndex =%d\n",curIndex);
 				szBuff = file_fw_data + curIndex;
 				curIndex =  curIndex + 8;
 
@@ -1014,8 +1014,8 @@ PAGE_REWRITE:
 			}
 			else
 			{
-	//			printk("byte %d\n",byte_count);
-	//			printk("curIndex =%d\n",curIndex);
+	//			CTP_DBG("byte %d\n",byte_count);
+	//			CTP_DBG("curIndex =%d\n",curIndex);
 				szBuff = file_fw_data + curIndex;
 				curIndex =  curIndex + 4;
 				//ioctl(fd, IOCTL_IAP_MODE_LOCK, data);
@@ -1043,18 +1043,18 @@ PAGE_REWRITE:
 		if (ACK_OK != res) 
 		{
 			//mdelay(50); 
-			printk("[ELAN] ERROR: GetAckData fail! res=%d\r\n", res);
+			CTP_DBG("[ELAN] ERROR: GetAckData fail! res=%d\r\n", res);
 			if ( res == ACK_REWRITE ) 
 			{
 				rewriteCnt = rewriteCnt + 1;
 				if (rewriteCnt == PAGERETRY)
 				{
-					printk("[ELAN] ID 0x%02x %dth page ReWrite %d times fails!\n", data, iPage, PAGERETRY);
+					CTP_DBG("[ELAN] ID 0x%02x %dth page ReWrite %d times fails!\n", data, iPage, PAGERETRY);
 					return E_FD;
 				}
 				else
 				{
-					printk("[ELAN] ---%d--- page ReWrite %d times!\n",  iPage, rewriteCnt);
+					CTP_DBG("[ELAN] ---%d--- page ReWrite %d times!\n",  iPage, rewriteCnt);
 					curIndex = curIndex - PageSize;
 					goto PAGE_REWRITE;
 				}
@@ -1064,18 +1064,18 @@ PAGE_REWRITE:
 				restartCnt = restartCnt + 1;
 				if (restartCnt >= 5)
 				{
-					printk("[ELAN] ID 0x%02x ReStart %d times fails!\n", data, IAPRESTART);
+					CTP_DBG("[ELAN] ID 0x%02x ReStart %d times fails!\n", data, IAPRESTART);
 					return E_FD;
 				}
 				else
 				{
-					printk("[ELAN] ===%d=== page ReStart %d times!\n",  iPage, restartCnt);
+					CTP_DBG("[ELAN] ===%d=== page ReStart %d times!\n",  iPage, restartCnt);
 					goto IAP_RESTART;
 				}
 			}
 		}
 		else
-		{       printk("  data : 0x%02x ",  data);  
+		{       CTP_DBG("  data : 0x%02x ",  data);  
 			rewriteCnt=0;
 			print_progress(iPage,ic_num,i);
 		}
@@ -1085,7 +1085,7 @@ PAGE_REWRITE:
 
 	//if (IAPReset() > 0)
 	if(IAP_OK_Reset(client) > 0) //Kenny
-		printk("[ELAN] Update ALL Firmware successfully!\n");
+		CTP_DBG("[ELAN] Update ALL Firmware successfully!\n");
 	return 0;
 }
 
@@ -1543,8 +1543,6 @@ static void elan_ktf2k_ts_report_data(struct i2c_client *client, uint8_t *buf, t
     int finger_num;
     int vl_point_num = 0;
     int vl_softkey_flag = 0;
-    uint8_t vl_esd_check_data[4] = { 0x78, 0x78, 0x78, 0x78}; // haihui.zeng
-    
 /* for 10 fingers   */
     if (buf[0] == TEN_FINGERS_PKT){
             finger_num = 10;
@@ -1658,15 +1656,8 @@ static void elan_ktf2k_ts_report_data(struct i2c_client *client, uint8_t *buf, t
             vl_point_num = 0;
             finger_num = 0;
             num = 0;
-            
-            //LINE<JIRA_ID><DATE20130620><esd check flag>zenghaihui
-            CTP_DBG("unknown packet type: %0x %0x %0x %0x\n", buf[0], buf[1], buf[2], buf[3]);
-            if( 0 == memcmp(buf, vl_esd_check_data, 4))
-            {
-                return;
-            }
-            
-            break;
+            printk("[elan] %s: unknown packet type: %0x\n", __func__, buf[0]);
+            break; // haihui.zeng  return;
     } // end switch
 
     
@@ -2445,32 +2436,6 @@ int retry;
 	}
 #endif
 
-    //LINE<JIRA_ID><DATE20130625><tp fw crashed, upgrade immediately>zenghaihui
-    if(0x80 == RECOVERY)
-    {
-        work_lock=1;
-        disable_irq(CUST_EINT_TOUCH_PANEL_NUM);
-        mt65xx_eint_mask(CUST_EINT_TOUCH_PANEL_NUM);
-        power_lock = 1;
-        printk("[elan] start fw update RECOVERY");
-
-        file_fw_data = file_fw_data_array;
-        file_fw_data_len = sizeof(file_fw_data_array);
-        
-        Update_FW_One(client, RECOVERY);
-        
-        file_fw_data = NULL;
-        file_fw_data_len = 0;
-
-        power_lock = 0;
-        work_lock=0;
-        enable_irq(CUST_EINT_TOUCH_PANEL_NUM);
-        mt65xx_eint_unmask(CUST_EINT_TOUCH_PANEL_NUM);
-        
-        RECOVERY = 0x00;
-
-    }
-
     //LINE<JIRA_ID><DATE20130424><for other TP>zenghaihui
     
 	
@@ -2491,7 +2456,7 @@ int retry;
     }
     else
     {
-        printk( "[elan] %s:  read X_RESOLUTION, Y_RESOLUTION error! \n",
+        printk( "[elan] %s:  not the elan chip\n",
                 __func__);
         goto elan_misc_register_failed;
     }

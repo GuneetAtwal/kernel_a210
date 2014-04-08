@@ -226,7 +226,7 @@ typedef struct OV5647MIPI_sensor_STRUCT
   kal_uint16 line_length;  
 } OV5647MIPI_sensor_struct;
 
-//#define OV5647MIPI_USE_OTP
+#define OV5647MIPI_USE_OTP
 
 #if defined(OV5647MIPI_USE_OTP)
 
@@ -246,8 +246,8 @@ struct OV5647MIPI_otp_struct
 #define OV5647MIPI_USE_AWB_OTP
 //#define OV5647_USE_LENC_OTP   //ov5647t no lens calibration data  //copy form OV5650 LENC OTP
 
-#define RG_TYPICAL 0x5B  //golden sample R/G ratio
-#define BG_TYPICAL 0x5F  //golden sample B/G ratio
+#define RG_TYPICAL 0x46  //golden sample R/G ratio
+#define BG_TYPICAL 0x66  //golden sample B/G ratio
 
 
 #endif

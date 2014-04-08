@@ -373,6 +373,7 @@ static void lcm_get_params(LCM_PARAMS *params)
 		params->dsi.vertical_active_line				= FRAME_HEIGHT;
 
 		params->dsi.intermediat_buffer_num = 0;//because DSI/DPI HW design change, this parameters should be 0 when video mode in MT658X; or memory leakage
+		params->dsi.pll_select = 1;
 
 		params->dsi.pll_div1=1;		// div1=0,1,2,3;div1_real=1,2,4,4
 		params->dsi.pll_div2=1;		// div2=0,1,2,3;div1_real=1,2,4,4

@@ -28,6 +28,8 @@ static struct i2c_board_info __initdata kd_lens_dev={ I2C_BOARD_INFO("FM50AF", 0
 #define FM50AFDB(x,...)
 #endif
 
+#define AF_DLC_MODE
+
 static spinlock_t g_FM50AF_SpinLock;
 
 static struct i2c_client * g_pstFM50AF_I2Cclient = NULL;
@@ -44,7 +46,7 @@ static unsigned long g_u4FM50AF_MACRO = 1023;
 static unsigned long g_u4TargetPosition = 0;
 static unsigned long g_u4CurrPosition   = 0;
 
-static int g_sr = 3;
+static int g_sr = 5;
 
 extern s32 mt_set_gpio_mode(u32 u4Pin, u32 u4Mode);
 extern s32 mt_set_gpio_out(u32 u4Pin, u32 u4PinOut);
@@ -65,7 +67,7 @@ static int s4FM50AF_ReadReg(unsigned short * a_pu2Result)
     }
 
     *a_pu2Result = (((u16)pBuff[0]) << 4) + (pBuff[1] >> 4);
-
+    //*a_pu2Result = (((u16)(pBuff[0] & 0x03)) << 8) + pBuff[1];
     return 0;
 }
 
@@ -73,7 +75,12 @@ static int s4FM50AF_WriteReg(u16 a_u2Data)
 {
     int  i4RetValue = 0;
 
+    //char puSuspendCmd[2] = {(char)(0x1C), (char)(0x25)};
+    //i4RetValue = i2c_master_send(g_pstFM50AF_I2Cclient, puSuspendCmd, 2);
+
     char puSendCmd[2] = {(char)(a_u2Data >> 4) , (char)(((a_u2Data & 0xF) << 4)+g_sr)};
+    //char puSendCmd[2] = {(char)(((a_u2Data >> 8) & 0x03) | 0xc0), (char)(a_u2Data & 0xff)};
+
 
     //FM50AFDB("[FM50AF] g_sr %d, write %d \n", g_sr, a_u2Data);
     g_pstFM50AF_I2Cclient->ext_flag |= I2C_A_FILTER_MSG;
@@ -160,7 +167,7 @@ inline static int moveFM50AF(unsigned long a_u4Position)
     //FM50AFDB("[FM50AF] move [curr] %d [target] %d\n", g_u4CurrPosition, g_u4TargetPosition);
 
             spin_lock(&g_FM50AF_SpinLock);
-            g_sr = 3;
+            //g_sr = 3;
             g_i4MotorStatus = 0;
             spin_unlock(&g_FM50AF_SpinLock);	
 		
@@ -240,10 +247,10 @@ unsigned long a_u4Param)
 //CAM_RESET
 static int FM50AF_Open(struct inode * a_pstInode, struct file * a_pstFile)
 {
+    long i4RetValue = 0;
+
     FM50AFDB("[FM50AF] FM50AF_Open - Start\n");
-
     spin_lock(&g_FM50AF_SpinLock);
-
     if(g_s4FM50AF_Opened)
     {
         spin_unlock(&g_FM50AF_SpinLock);
@@ -251,12 +258,36 @@ static int FM50AF_Open(struct inode * a_pstInode, struct file * a_pstFile)
         return -EBUSY;
     }
 
-    g_s4FM50AF_Opened = 1;
-		
+    g_s4FM50AF_Opened = 1;		
     spin_unlock(&g_FM50AF_SpinLock);
 
-    FM50AFDB("[FM50AF] FM50AF_Open - End\n");
+#ifdef AF_DLC_MODE
+    char puSendCmd[2] = {(char)(0xEC) , (char)(0xA3)};
+    i4RetValue = i2c_master_send(g_pstFM50AF_I2Cclient, puSendCmd, 2);
 
+    char puSendCmd2[2] = {(char)(0xA1) , (char)(0x0D)}; // Jiangde, 0x05-->0x0D, Fast focus
+    i4RetValue = i2c_master_send(g_pstFM50AF_I2Cclient, puSendCmd2, 2);
+
+    char puSendCmd3[2] = {(char)(0xF2) , (char)(0xE8)}; // Jiangde, 0x90-->0xE0, vibrate periods. 9111=E8
+    i4RetValue = i2c_master_send(g_pstFM50AF_I2Cclient, puSendCmd3, 2);
+
+    char puSendCmd4[2] = {(char)(0xDC) , (char)(0x51)};
+    i4RetValue = i2c_master_send(g_pstFM50AF_I2Cclient, puSendCmd4, 2);
+#else //AF_LSC_MODE
+    char puSendCmd[2] = {(char)(0xEC) , (char)(0xA3)};
+    i4RetValue = i2c_master_send(g_pstFM50AF_I2Cclient, puSendCmd, 2);
+
+    char puSendCmd2[2] = {(char)(0xA1) , (char)(0x05)};
+    i4RetValue = i2c_master_send(g_pstFM50AF_I2Cclient, puSendCmd2, 2);
+
+    char puSendCmd3[2] = {(char)(0xF2) , (char)(0x90)};
+    i4RetValue = i2c_master_send(g_pstFM50AF_I2Cclient, puSendCmd3, 2);
+
+    char puSendCmd4[2] = {(char)(0xDC) , (char)(0x51)};
+    i4RetValue = i2c_master_send(g_pstFM50AF_I2Cclient, puSendCmd4, 2);
+#endif
+
+    FM50AFDB("[FM50AF] FM50AF_Open - End\n");
     return 0;
 }
 
@@ -459,7 +490,7 @@ static struct platform_driver g_stFM50AF_Driver = {
 static int __init FM50AF_i2C_init(void)
 {
     i2c_register_board_info(LENS_I2C_BUSNUM, &kd_lens_dev, 1);
-	
+
     if(platform_driver_register(&g_stFM50AF_Driver)){
         FM50AFDB("failed to register FM50AF driver\n");
         return -ENODEV;

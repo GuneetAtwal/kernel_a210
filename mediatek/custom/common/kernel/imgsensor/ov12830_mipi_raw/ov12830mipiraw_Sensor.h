@@ -76,9 +76,6 @@ typedef struct
 
 	kal_bool OV12830AutoFlickerMode;
 	kal_bool OV12830VideoMode;
-
-	kal_uint16 write_id;
-	kal_uint16 read_id;
 	
 }OV12830_PARA_STRUCT,*POV12830_PARA_STRUCT;
 
@@ -148,12 +145,8 @@ typedef struct
 	#define OV12830_IMAGE_SENSOR_FULL_INSERTED_PIXELS		4
 	#define OV12830_IMAGE_SENSOR_FULL_INSERTED_LINES		4
 
-/* SENSOR READ/WRITE ID */
-#define OV12830_SLAVE_WRITE_ID_1   (0x6C)
-#define OV12830_SLAVE_WRITE_ID_2   (0x20)
-
-#define OV12830MIPI_WRITE_ID 	(0x20) //0x6C
-#define OV12830MIPI_READ_ID	(0x21) //0x6D
+#define OV12830MIPI_WRITE_ID 	(0x6C)
+#define OV12830MIPI_READ_ID	(0x6D)
 
 // SENSOR CHIP VERSION
 

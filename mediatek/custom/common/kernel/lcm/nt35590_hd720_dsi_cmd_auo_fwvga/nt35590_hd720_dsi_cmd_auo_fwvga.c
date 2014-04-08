@@ -312,7 +312,7 @@ static void lcm_get_params(LCM_PARAMS *params)
 		params->dsi.vertical_active_line=1280;
 
 		params->dsi.intermediat_buffer_num = 0;//because DSI/DPI HW design change, this parameters should be 0 when video mode in MT658X; or memory leakage
-
+		params->dsi.pll_select=1;	//0: MIPI_PLL; 1: LVDS_PLL
 		// Bit rate calculation, calculation forma be different to mt657x
 #ifdef CONFIG_MT6589_FPGA
 		params->dsi.pll_div1=2;		// div1=0,1,2,3;div1_real=1,2,4,4

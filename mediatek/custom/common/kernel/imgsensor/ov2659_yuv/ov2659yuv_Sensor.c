@@ -629,6 +629,10 @@ static kal_uint32 OV2659_GetSensorID(kal_uint32 *sensorID)
 		{
 			sensor_id = (OV2659_read_cmos_sensor(0x300A) << 8) | OV2659_read_cmos_sensor(0x300B);
 			OV2659SENSORDB("OV2659 READ ID: %x",sensor_id);
+
+                //LINE<JIRA_ID><DATE20130405><add camera info>zenghaihui
+                *sensorID = sensor_id;
+                    
 			if(sensor_id != OV2659_SENSOR_ID)
 			{	
 				*sensorID =0xffffffff;

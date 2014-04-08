@@ -32,24 +32,14 @@
 *  THE RULES OF THE INTERNATIONAL CHAMBER OF COMMERCE (ICC).
 *
 *****************************************************************************/
-#ifdef BUILD_LK
-	#include <platform/mt_gpio.h>
-
-	#define LCM_PRINT printf
-#define LCM_DBG(fmt, arg...) \
-	LCM_PRINT("[LCM-LT4015W-DSI] %s (line:%d) :" fmt "\r\n", __func__, __LINE__, ## arg)
-
-#else
 
 #include <linux/string.h>
 #ifdef BUILD_UBOOT
-#include <asm/arch/mt_gpio.h>
+#include <asm/arch/mt6575_gpio.h>
 #else
-#include <mach/mt_gpio.h>
+#include <mach/mt6575_gpio.h>
 #endif
 #include <cust_gpio_usage.h>
-#endif //BUILD_LK
-
 #include "lcm_drv.h"
 
 // ---------------------------------------------------------------------------
@@ -59,14 +49,10 @@
 #define FRAME_WIDTH  (480)
 #define FRAME_HEIGHT (800)
 #define LCM_ID       (0x1408)
-#define REGFLAG_DELAY             							0XFE
-#define REGFLAG_END_OF_TABLE      							0xFF   // END OF REGISTERS MARKER
-#define GPIO_DISP_LRSTB_PIN GPIO18
 // ---------------------------------------------------------------------------
 //  Local Variables
 // ---------------------------------------------------------------------------
 
-static unsigned int lcm_compare_id(void);
 static LCM_UTIL_FUNCS lcm_util = {0};
 
 #define SET_RESET_PIN(v)    (lcm_util.set_reset_pin((v)))
@@ -87,146 +73,6 @@ static LCM_UTIL_FUNCS lcm_util = {0};
 #define read_reg_v2(cmd, buffer, buffer_size)   				lcm_util.dsi_dcs_read_lcm_reg_v2(cmd, buffer, buffer_size)           
 
 #define LCM_DSI_CMD_MODE
-
-static struct LCM_setting_table {
-    unsigned cmd;
-    unsigned char count;
-    unsigned char para_list[64];
-};
-
-static struct LCM_setting_table lcm_initialization_setting[] = {
-	
-	/*
-	Note :
-
-	Data ID will depends on the following rule.
-	
-		count of parameters > 1	=> Data ID = 0x39
-		count of parameters = 1	=> Data ID = 0x15
-		count of parameters = 0	=> Data ID = 0x05
-
-	Structure Format :
-
-	{DCS command, count of parameters, {parameter list}}
-	{REGFLAG_DELAY, milliseconds of time, {}},
-
-	...
-
-	Setting ending by predefined flag
-	
-	{REGFLAG_END_OF_TABLE, 0x00, {}}
-	*/
-
-	//#Enable Page1
-	{0xB0,	1,	{0x04}},
-	{REGFLAG_DELAY, 1, {}},
-	//# VGMP/VGMN/VOOM Setting, VGMP=4.8V  #VGSP=0.6125V
-	{0xB3,	2,	{0x02,0x00}},
-	{REGFLAG_DELAY, 1, {}},
-	//# VGMN=-4.8V  #VGSN=-0.6125V
-	{0xBF,	2,	{0xBD,0x00}},
-	{REGFLAG_DELAY, 1, {}},
-	//#VCOM=
-	{0xC1,	16,	{0x43,0x31,0x39,0x21,0x20,0x32,0x12,0x28,0x0c,
-	             0x0c,0xA5,0x0F,0x58,0x21,0x01}},
-	{REGFLAG_DELAY, 1, {}},
-
-	//#R+
-	{0xC2,	6,	{0x28,0x06,0x06,0x01,0x03,0x00}},
-	{REGFLAG_DELAY, 1, {}},
-	//#G+
-	{0xC8,	24,	{0x00,0x0D,0x1F,0x29,0x36,0x4D,0x37,0x25,0x19,0x11,
-				0x08,0x01,0x00,0x0D,0x1F,0x29,0x36,0x4D,0x37,0x25,0x19,
-				0x11,0x08,0x01,
-			}},
-	{REGFLAG_DELAY, 1, {}},
-	//#B+
-	{0xC9,	24,	{0x00,0x0D,0x1F,0x29,0x36,0x4D,0x37,0x25,0x19,0x11,
-				0x08,0x01,0x00,0x0D,0x1F,0x29,0x36,0x4D,0x37,0x25,0x19,
-				0x11,0x08,0x01,
-			}},
-	{REGFLAG_DELAY, 1, {}},
-	//#R-
-	{0xCA,	24,	{0x00,0x0D,0x1F,0x29,0x36,0x4D,0x37,0x25,0x19,0x11,
-				0x08,0x01,0x00,0x0D,0x1F,0x29,0x36,0x4D,0x37,0x25,0x19,
-				0x11,0x08,0x01,
-			}},
-	{REGFLAG_DELAY, 1, {}},
-	//#G-
-	{0xD0,	16,	{0x29,0x03,0xCE,0xA6,0x00,0x43,0x20,0x10,0x01,0x00,
-				0x01,0x01,0x00,0x03,0x01,0x00}},
-	{REGFLAG_DELAY, 1, {}},
-	//#B-
-	{0xD1,	7,	{0x18,0x0C,0x23,0x03,0x75,0x02,0x50}},
-	{REGFLAG_DELAY, 1, {}},	
-	
-	{0xD3,	1,	{0x33}},
-	{REGFLAG_DELAY, 1, {}},
-	//# AVDD: manual,
-	{0xD5,	2,	{0x2A,0x2A}},
-	{REGFLAG_DELAY, 1, {}},
-	//#Power Control for VCL
-	{0xDE,	2,	{0x01,0x51}},
-	{REGFLAG_DELAY, 1, {}},
-	
-	{0xE6,	1,	{0x51}},
-	{REGFLAG_DELAY, 1, {}},
-	//# AVEE: manual, ©\6V
-	{0xFA,	1,	{0x03}},
-	{REGFLAG_DELAY, 1, {}},
-	
-	{0xD6,	1,	{0x28}},//{0x34,0x34,0x34}
-	{REGFLAG_DELAY, 100, {}},
-	//# VGL(LVGL):
-	{0x2A,	4,	{0x00,0x00,0x01,0xDF}},//{0x14,0x14,0x14}
-	{REGFLAG_DELAY, 1, {}},
-	
-	//#Enable Page0
-	{0x2B,	4,	{0x00,0x00,0x03,0x1F}},
-	{REGFLAG_DELAY, 1, {}},
-	
-	{0x36,	1,	{0x00}},
-	{REGFLAG_DELAY, 1, {}},
-
-	{0x3A,	1,	{0x77}},
-	{REGFLAG_DELAY, 1, {}},
-	
-	{0x11,	0,	{0x00}},
-	{REGFLAG_DELAY, 200, {}},
-	
-	{0x29,	0,	{0x00}},
-	{REGFLAG_DELAY, 20, {}},
-
-	{0x2C,	0,	{0x00}},
-	
-	{REGFLAG_END_OF_TABLE, 0x00, {}}
-};
-
-static void push_table(struct LCM_setting_table *table, unsigned int count, unsigned char force_update)
-{
-	unsigned int i;
-
-	for(i = 0; i < count; i++) {
-		
-	    unsigned cmd;
-	    cmd = table[i].cmd;
-		
-	    switch (cmd) {
-			
-	        case REGFLAG_DELAY :
-	            MDELAY(table[i].count);
-	            break;
-				
-	        case REGFLAG_END_OF_TABLE :
-	            break;
-				
-	        default:
-//				dsi_send_cmdq_tinno(cmd, table[i].count, table[i].para_list, force_update);
-				dsi_set_cmdq_V2(cmd, table[i].count, table[i].para_list, force_update);
-	   	}
-	}
-
-}
 
 static void init_lcm_registers(void)
 {
@@ -325,13 +171,13 @@ static void lcm_get_params(LCM_PARAMS *params)
 		params->height = FRAME_HEIGHT;
 
 		// enable tearing-free
-//		params->dbi.te_mode 				= LCM_DBI_TE_MODE_VSYNC_ONLY;
-		params->dbi.te_mode 				= LCM_DBI_TE_MODE_DISABLED;
-//		params->dbi.te_edge_polarity		= LCM_POLARITY_RISING;
+		params->dbi.te_mode 				= LCM_DBI_TE_MODE_VSYNC_ONLY;
+//		params->dbi.te_mode 				= LCM_DBI_TE_MODE_DISABLED;
+		params->dbi.te_edge_polarity		= LCM_POLARITY_RISING;
 
 	
 		// DSI
-		// Command mode setting 
+		/* Command mode setting */
 		params->dsi.LANE_NUM				= LCM_TWO_LANE;
 		//The following defined the fomat for data coming from LCD engine.
 		params->dsi.data_format.color_order = LCM_COLOR_ORDER_RGB;
@@ -374,9 +220,8 @@ static void lcm_init(void)
     lcm_util.set_gpio_out(GPIO_DISP_LRSTB_PIN, GPIO_OUT_ONE);
     MDELAY(50);
 
-//    init_lcm_registers();
-	 push_table(lcm_initialization_setting, sizeof(lcm_initialization_setting) / sizeof(struct LCM_setting_table), 1);
-	 MDELAY(100);
+    init_lcm_registers();
+	MDELAY(500);
 //	clear_panel();
 }
 
@@ -429,22 +274,19 @@ static void lcm_update(unsigned int x, unsigned int y,
 	data_array[0]= 0x00053902;
 	data_array[1]= (x1_MSB<<24)|(x0_LSB<<16)|(x0_MSB<<8)|0x2a;
 	data_array[2]= (x1_LSB);
-	dsi_set_cmdq(&data_array, 3, 1);
-	data_array[0]= 0x00053902;
-	data_array[1]= (y1_MSB<<24)|(y0_LSB<<16)|(y0_MSB<<8)|0x2b;
-	data_array[2]= (y1_LSB);
-	dsi_set_cmdq(&data_array, 3, 1);
-	data_array[0]= 0x00290508;
-	dsi_set_cmdq(&data_array, 1, 1);	
-	data_array[0]= 0x002c3909;
-	dsi_set_cmdq(&data_array, 1, 0);
+	data_array[3]= 0x00053902;
+	data_array[4]= (y1_MSB<<24)|(y0_LSB<<16)|(y0_MSB<<8)|0x2b;
+	data_array[5]= (y1_LSB);
+	data_array[6]= 0x002c3909;
+//	data_array[6]= 0x002c3901;
+
+	dsi_set_cmdq(data_array, 7, 0);
 
 }
 
 static void lcm_setbacklight(unsigned int level)
 {
   unsigned int data_array[16];
-  return;
   data_array[0] = 0x00052902;
   data_array[1] = 0x020000B9 | (level << 16); //B9
   data_array[2] = 0x00000008; 
@@ -457,7 +299,6 @@ static unsigned int lcm_compare_id(void)
 	unsigned char buffer[5];
 	unsigned int array[16];
         //NOTE:should reset LCM firstly
-         MDELAY(5);
     lcm_util.set_gpio_out(GPIO_DISP_LRSTB_PIN, GPIO_OUT_ZERO);
     MDELAY(25);
     lcm_util.set_gpio_out(GPIO_DISP_LRSTB_PIN, GPIO_OUT_ONE);
@@ -475,8 +316,7 @@ static unsigned int lcm_compare_id(void)
 #if defined(BUILD_UBOOT)
 	printf("%s, id1 = 0x%x\n", __func__, id);
 #endif
-    //return (LCM_ID == id)?1:0;
-    return 1;
+    return (LCM_ID == id)?1:0;
 }
 
 LCM_DRIVER r61408_lcm_drv = 
@@ -488,6 +328,7 @@ LCM_DRIVER r61408_lcm_drv =
 	.suspend        = lcm_suspend,
 	.resume         = lcm_resume,
 	.update         = lcm_update,
+	.set_backlight   = lcm_setbacklight,
 	.compare_id     = lcm_compare_id
 };
 

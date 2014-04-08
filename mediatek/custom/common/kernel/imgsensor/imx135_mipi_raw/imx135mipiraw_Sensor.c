@@ -70,12 +70,25 @@
 #include "imx135mipiraw_Camera_Sensor_para.h"
 #include "imx135mipiraw_CameraCustomized.h"
 
-kal_bool  IMX135MIPI_MPEG4_encode_mode = KAL_FALSE;
-kal_bool IMX135MIPI_Auto_Flicker_mode = KAL_FALSE;
+#define IMX135_USE_OTP
+
+#ifdef IMX135_USE_OTP
+#define IMX135_USE_AWB_OTP
+#define IMX135_USE_LENC_OTP
+static uint16_t used_otp = 0;
+extern int update_lens();
+extern int update_awb_gain();
+extern int update_otp_lenc();
+extern int update_otp_wb();
+extern bool is_sunny_p13n03h();
+#endif
+
+static kal_bool  IMX135MIPI_MPEG4_encode_mode = KAL_FALSE;
+static kal_bool IMX135MIPI_Auto_Flicker_mode = KAL_FALSE;
 
 
-kal_uint8 IMX135MIPI_sensor_write_I2C_address = IMX135MIPI_WRITE_ID;
-kal_uint8 IMX135MIPI_sensor_read_I2C_address = IMX135MIPI_READ_ID;
+static kal_uint8 IMX135MIPI_sensor_write_I2C_address = IMX135MIPI_WRITE_ID;
+static kal_uint8 IMX135MIPI_sensor_read_I2C_address = IMX135MIPI_READ_ID;
 
 
 	
@@ -83,28 +96,28 @@ kal_uint8 IMX135MIPI_sensor_read_I2C_address = IMX135MIPI_READ_ID;
 static struct IMX135MIPI_sensor_STRUCT IMX135MIPI_sensor={IMX135MIPI_WRITE_ID,IMX135MIPI_READ_ID,KAL_TRUE,KAL_FALSE,KAL_TRUE,KAL_FALSE,
 KAL_FALSE,KAL_FALSE,KAL_FALSE,231270000,231270000,259200000,0,0,0,64,64,64,IMX135MIPI_PV_LINE_LENGTH_PIXELS,
 IMX135MIPI_PV_FRAME_LENGTH_LINES,IMX135MIPI_VIDEO_LINE_LENGTH_PIXELS,IMX135MIPI_VIDEO_FRAME_LENGTH_LINES,IMX135MIPI_FULL_LINE_LENGTH_PIXELS,IMX135MIPI_FULL_FRAME_LENGTH_LINES,0,0,0,0,0,0,30};
-MSDK_SCENARIO_ID_ENUM CurrentScenarioId = MSDK_SCENARIO_ID_CAMERA_PREVIEW;
+static MSDK_SCENARIO_ID_ENUM CurrentScenarioId = MSDK_SCENARIO_ID_CAMERA_PREVIEW;
 
 
-kal_uint16  IMX135MIPI_sensor_gain_base=0x0;
+static kal_uint16  IMX135MIPI_sensor_gain_base=0x0;
 /* MAX/MIN Explosure Lines Used By AE Algorithm */
-kal_uint16 IMX135MIPI_MAX_EXPOSURE_LINES = IMX135MIPI_PV_FRAME_LENGTH_LINES-5;
-kal_uint8  IMX135MIPI_MIN_EXPOSURE_LINES = 2;
-kal_uint32 IMX135MIPI_isp_master_clock;
+static kal_uint16 IMX135MIPI_MAX_EXPOSURE_LINES = IMX135MIPI_PV_FRAME_LENGTH_LINES-5;
+static kal_uint8  IMX135MIPI_MIN_EXPOSURE_LINES = 2;
+static kal_uint32 IMX135MIPI_isp_master_clock;
 static DEFINE_SPINLOCK(imx111_drv_lock);
 
-#define SENSORDB(fmt, arg...) printk( "[IMX135MIPIRaw] "  fmt, ##arg)
+#define SENSORDB(fmt, arg...) printk( "[IMX135MIPIRaw(sunny)] "  fmt, ##arg)
 #define RETAILMSG(x,...)
 #define TEXT
-UINT8 IMX135MIPIPixelClockDivider=0;
-kal_uint16 IMX135MIPI_sensor_id=0;
-MSDK_SENSOR_CONFIG_STRUCT IMX135MIPISensorConfigData;
-kal_uint32 IMX135MIPI_FAC_SENSOR_REG;
-kal_uint16 IMX135MIPI_sensor_flip_value; 
+static UINT8 IMX135MIPIPixelClockDivider=0;
+static kal_uint16 IMX135MIPI_sensor_id=0;
+static MSDK_SENSOR_CONFIG_STRUCT IMX135MIPISensorConfigData;
+static kal_uint32 IMX135MIPI_FAC_SENSOR_REG;
+static kal_uint16 IMX135MIPI_sensor_flip_value; 
 																				 // Gain Index
 
 #define IMX135MIPI_MaxGainIndex (71)
-kal_uint16 IMX135MIPI_sensorGainMapping[IMX135MIPI_MaxGainIndex][2] ={
+static kal_uint16 IMX135MIPI_sensorGainMapping[IMX135MIPI_MaxGainIndex][2] ={
 	#if 1
 	{71  ,25 },
 	{76  ,42 },
@@ -184,12 +197,19 @@ kal_uint16 IMX135MIPI_sensorGainMapping[IMX135MIPI_MaxGainIndex][2] ={
 
 
 /* FIXME: old factors and DIDNOT use now. s*/
-SENSOR_REG_STRUCT IMX135MIPISensorCCT[]=CAMERA_SENSOR_CCT_DEFAULT_VALUE;
-SENSOR_REG_STRUCT IMX135MIPISensorReg[ENGINEER_END]=CAMERA_SENSOR_REG_DEFAULT_VALUE;
+static SENSOR_REG_STRUCT IMX135MIPISensorCCT[]=CAMERA_SENSOR_CCT_DEFAULT_VALUE;
+static SENSOR_REG_STRUCT IMX135MIPISensorReg[ENGINEER_END]=CAMERA_SENSOR_REG_DEFAULT_VALUE;
 /* FIXME: old factors and DIDNOT use now. e*/
 extern int iReadReg(u16 a_u2Addr , u8 * a_puBuff , u16 i2cId);
 extern int iWriteReg(u16 a_u2Addr , u32 a_u4Data , u32 a_u4Bytes , u16 i2cId);
 #define IMX135MIPI_write_cmos_sensor(addr, para) iWriteReg((u16) addr , (u32) para , 1, IMX135MIPI_WRITE_ID)
+
+static UINT32 IMX135MIPIOpen(void);
+static UINT32 IMX135MIPIGetResolution(MSDK_SENSOR_RESOLUTION_INFO_STRUCT *pSensorResolution);
+static UINT32 IMX135MIPIGetInfo(MSDK_SCENARIO_ID_ENUM ScenarioId, MSDK_SENSOR_INFO_STRUCT *pSensorInfo, MSDK_SENSOR_CONFIG_STRUCT *pSensorConfigData);
+static UINT32 IMX135MIPIControl(MSDK_SCENARIO_ID_ENUM ScenarioId, MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *pImageWindow, MSDK_SENSOR_CONFIG_STRUCT *pSensorConfigData);
+static UINT32 IMX135MIPIFeatureControl(MSDK_SENSOR_FEATURE_ENUM FeatureId, UINT8 *pFeaturePara,UINT32 *pFeatureParaLen);
+static UINT32 IMX135MIPIClose(void);
 
 kal_uint16 IMX135MIPI_read_cmos_sensor(kal_uint32 addr)
 {
@@ -198,7 +218,7 @@ kal_uint16 IMX135MIPI_read_cmos_sensor(kal_uint32 addr)
     return get_byte;
 }
 
-void IMX135MIPI_write_shutter(kal_uint16 shutter)
+static void IMX135MIPI_write_shutter(kal_uint16 shutter)
 {
  //  return ; 
 	kal_uint32 frame_length = 0,line_length=0;
@@ -309,7 +329,7 @@ static kal_uint8 IMX135MIPIGain2Reg(const kal_uint16 iGain)
 * GLOBALS AFFECTED
 *
 *************************************************************************/
-void IMX135MIPI_SetGain(UINT16 iGain)
+static void IMX135MIPI_SetGain(UINT16 iGain)
 {
 //return;
     kal_uint8 iReg;
@@ -340,16 +360,16 @@ void IMX135MIPI_SetGain(UINT16 iGain)
 * GLOBALS AFFECTED
 *
 *************************************************************************/
-kal_uint16 read_IMX135MIPI_gain(void)
+static kal_uint16 read_IMX135MIPI_gain(void)
 {
     return (kal_uint16)(IMX135MIPI_read_cmos_sensor(0x0205)) ;
 }  /* read_IMX135MIPI_gain */
 
-void write_IMX135MIPI_gain(kal_uint16 gain)
+static void write_IMX135MIPI_gain(kal_uint16 gain)
 {
     IMX135MIPI_SetGain(gain);
 }
-void IMX135MIPI_camera_para_to_sensor(void)
+static void IMX135MIPI_camera_para_to_sensor(void)
 {
 
 	kal_uint32    i;
@@ -385,7 +405,7 @@ void IMX135MIPI_camera_para_to_sensor(void)
 * GLOBALS AFFECTED
 *
 *************************************************************************/
-void IMX135MIPI_sensor_to_camera_para(void)
+static void IMX135MIPI_sensor_to_camera_para(void)
 {
 
 	kal_uint32    i,temp_data;
@@ -422,12 +442,12 @@ void IMX135MIPI_sensor_to_camera_para(void)
 * GLOBALS AFFECTED
 *
 *************************************************************************/
-kal_int32  IMX135MIPI_get_sensor_group_count(void)
+static kal_int32  IMX135MIPI_get_sensor_group_count(void)
 {
     return GROUP_TOTAL_NUMS;
 }
 
-void IMX135MIPI_get_sensor_group_info(kal_uint16 group_idx, kal_int8* group_name_ptr, kal_int32* item_count_ptr)
+static void IMX135MIPI_get_sensor_group_info(kal_uint16 group_idx, kal_int8* group_name_ptr, kal_int32* item_count_ptr)
 {
    switch (group_idx)
    {
@@ -452,7 +472,7 @@ void IMX135MIPI_get_sensor_group_info(kal_uint16 group_idx, kal_int8* group_name
 }
 }
 
-void IMX135MIPI_get_sensor_item_info(kal_uint16 group_idx,kal_uint16 item_idx, MSDK_SENSOR_ITEM_INFO_STRUCT* info_ptr)
+static void IMX135MIPI_get_sensor_item_info(kal_uint16 group_idx,kal_uint16 item_idx, MSDK_SENSOR_ITEM_INFO_STRUCT* info_ptr)
 {
     kal_int16 temp_reg=0;
     kal_uint16 temp_gain=0, temp_addr=0, temp_para=0;
@@ -592,7 +612,7 @@ void IMX135MIPI_get_sensor_item_info(kal_uint16 group_idx,kal_uint16 item_idx, M
 
 //}
 
-kal_bool IMX135MIPI_set_sensor_item_info(kal_uint16 group_idx, kal_uint16 item_idx, kal_int32 ItemValue)
+static kal_bool IMX135MIPI_set_sensor_item_info(kal_uint16 group_idx, kal_uint16 item_idx, kal_int32 ItemValue)
 {
 //   kal_int16 temp_reg;
    kal_uint16 temp_addr=0, temp_para=0;
@@ -778,7 +798,11 @@ static void IMX135MIPI_Sensor_Init(void)
 	IMX135MIPI_write_cmos_sensor(0x3494, 0x1E);//
 	IMX135MIPI_write_cmos_sensor(0x3511, 0x8F);//
 	IMX135MIPI_write_cmos_sensor(0x364F, 0x2D);//
-
+#ifdef IMX135_USE_OTP
+	#ifdef IMX135_USE_LENC_OTP
+	update_lens();
+	#endif
+#endif
 //quality
 
 	//defect forrection recommended setting
@@ -899,7 +923,7 @@ static void IMX135MIPI_Sensor_Init(void)
 }   /*  IMX135MIPI_Sensor_Init  */
 
 
-void VideoFullSizeSetting(void)//16:9   6M
+static void VideoFullSizeSetting(void)//16:9   6M
 {
 #if 1
 
@@ -1011,6 +1035,11 @@ void VideoFullSizeSetting(void)//16:9   6M
 	IMX135MIPI_write_cmos_sensor(0x0213,0x00);//   
 	IMX135MIPI_write_cmos_sensor(0x0214,0x01);//   
 	IMX135MIPI_write_cmos_sensor(0x0215,0x00);//
+#ifdef IMX135_USE_OTP
+	#ifdef IMX135_USE_AWB_OTP
+	update_awb_gain();
+	#endif
+#endif
 
 #if 0
 	//hdr setting
@@ -1042,7 +1071,7 @@ void VideoFullSizeSetting(void)//16:9   6M
 }
 
 
-void PreviewSetting(void)
+static void PreviewSetting(void)
 {
 #if 1   // 4 lane
 
@@ -1153,6 +1182,11 @@ void PreviewSetting(void)
 	IMX135MIPI_write_cmos_sensor(0x0213,0x00);//   
 	IMX135MIPI_write_cmos_sensor(0x0214,0x01);//   
 	IMX135MIPI_write_cmos_sensor(0x0215,0x00);//
+#ifdef IMX135_USE_OTP
+	#ifdef IMX135_USE_AWB_OTP
+	update_awb_gain();
+	#endif
+#endif
 
 #if 0
 	//hdr setting
@@ -1182,7 +1216,7 @@ void PreviewSetting(void)
     SENSORDB("[IMX135MIPIRaw] Set preview setting  End\n"); 
 }
 
-void IMX135MIPI_set_13M(void)
+static void IMX135MIPI_set_13M(void)
 {	
 
 	IMX135MIPI_write_cmos_sensor(0x0100,0x00);// STREAM STop
@@ -1292,7 +1326,11 @@ void IMX135MIPI_set_13M(void)
 	IMX135MIPI_write_cmos_sensor(0x0213,0x00);//   
 	IMX135MIPI_write_cmos_sensor(0x0214,0x01);//   
 	IMX135MIPI_write_cmos_sensor(0x0215,0x00);//
-
+#ifdef IMX135_USE_OTP
+	#ifdef IMX135_USE_AWB_OTP
+	update_awb_gain();
+	#endif
+#endif
 #if 0
 	//hdr setting
 	IMX135MIPI_write_cmos_sensor(0x0230,0x00);//   
@@ -1318,6 +1356,26 @@ void IMX135MIPI_set_13M(void)
     SENSORDB("[IMX135MIPIRaw] Set 13M End\n"); 
 }
 
+//LINE<JIRA_ID><DATE20130604><read CAM_ID value>zenghaihui
+extern int IMM_GetOneChannelValue(int dwChannel, int data[4], int* rawdata);
+static int IMX135_get_cam_id_evrage_data(int times, int Channel)
+{
+	int ret = 0, data[4], i, ret_value = 0, ret_temp = 0;
+
+	i = times;
+	while (i--)
+	{
+		ret_value = IMM_GetOneChannelValue(Channel, data, &ret_temp);
+		ret += ret_temp;
+//		printk("[auxadc_get_data(channel%d)]: ret_temp=%d\n",Channel,ret_temp);        
+//		msleep(10);
+	}
+
+	ret = ret / times;
+	return ret;
+}
+
+
 
 
 /*****************************************************************************/
@@ -1340,9 +1398,29 @@ void IMX135MIPI_set_13M(void)
 *
 *************************************************************************/
 
-UINT32 IMX135MIPIOpen(void)
+static UINT32 IMX135MIPIOpen(void)
 {
+    int cam_id_adc_value = -1;
 
+#ifdef IMX135_USE_OTP
+    if(0 == used_otp){
+	printk("before otp............................................\n");
+	printk("before otp............................................\n");
+	printk("before otp............................................\n");
+
+	#ifdef IMX135_USE_LENC_OTP
+	update_otp_lenc();
+	#endif
+	#ifdef IMX135_USE_AWB_OTP
+	update_otp_wb();
+	#endif
+
+	used_otp =1;
+	printk("after otp............................................\n");
+	printk("after otp............................................\n");
+	printk("after otp............................................\n");
+    }
+#endif
     int  retry = 0; 
     // check if sensor ID correct
     retry = 3; 
@@ -1363,6 +1441,18 @@ UINT32 IMX135MIPIOpen(void)
     SENSORDB("Read Sensor ID = 0x%04x\n", IMX135MIPI_sensor_id); 
     if (IMX135MIPI_sensor_id != IMX135MIPI_SENSOR_ID)
         return ERROR_SENSOR_CONNECT_FAIL;
+
+    //LINE<JIRA_ID><DATE20130604><read CAM_ID value, sunny ID(DGEN), normal is <=45>zenghaihui
+    cam_id_adc_value = IMX135_get_cam_id_evrage_data(2, 1);
+    SENSORDB("IMX135MIPIGetSensorID  cam_id_adc_value = %d \n", cam_id_adc_value); 
+
+    // if (cam_id_adc_value > 1000) { // truly sensor, return fail // LINE <20130710> <read OTP to check if sunny p13n03h> Jiangde
+    if (!is_sunny_p13n03h()) { // LINE <20130710> <read OTP to check if sunny p13n03h> Jiangde
+        IMX135MIPI_sensor_id=0; 
+        return ERROR_SENSOR_CONNECT_FAIL;
+    }
+
+    
     IMX135MIPI_Sensor_Init();
 	sensorid=read_IMX135MIPI_gain();
 	spin_lock(&imx111_drv_lock);	
@@ -1371,6 +1461,7 @@ UINT32 IMX135MIPIOpen(void)
 	SENSORDB("IMX135MIPIOpen exit:"); 
     return ERROR_NONE;
 }
+
 
 /*************************************************************************
 * FUNCTION
@@ -1388,8 +1479,11 @@ UINT32 IMX135MIPIOpen(void)
 * GLOBALS AFFECTED
 *
 *************************************************************************/
-UINT32 IMX135MIPIGetSensorID(UINT32 *sensorID) 
+//extern int PMIC_IMM_GetOneChannelValue(int dwChannel, int deCount, int trimd);
+static UINT32 IMX135MIPIGetSensorID(UINT32 *sensorID) 
 {
+    int cam_id_adc_value = -1;
+
     int  retry = 3; 
 	kal_uint16 sensorIDH = 0;
 	kal_uint16 sensorIDL = 0;
@@ -1410,10 +1504,23 @@ UINT32 IMX135MIPIGetSensorID(UINT32 *sensorID)
 		
     } while (retry > 0);
 
+
     if (*sensorID != IMX135MIPI_SENSOR_ID) {
         *sensorID = 0xFFFFFFFF; 
         return ERROR_SENSOR_CONNECT_FAIL;
     }
+    
+    //LINE<JIRA_ID><DATE20130604><read CAM_ID value, sunny ID(DGEN), normal is <=45>zenghaihui
+    cam_id_adc_value = IMX135_get_cam_id_evrage_data(2, 1);
+    SENSORDB("IMX135MIPIGetSensorID  cam_id_adc_value = %d \n", cam_id_adc_value); 
+
+    // if (cam_id_adc_value > 1000) { // truly sensor, return fail // LINE <20130710> <read OTP to check if sunny p13n03h> Jiangde
+    if (!is_sunny_p13n03h()) { // LINE <20130710> <read OTP to check if sunny p13n03h> Jiangde  
+        *sensorID = 0xFFFFFFFF; 
+        return ERROR_SENSOR_CONNECT_FAIL;
+    }
+
+    
     return ERROR_NONE;
 }
 
@@ -1434,7 +1541,7 @@ UINT32 IMX135MIPIGetSensorID(UINT32 *sensorID)
 * GLOBALS AFFECTED
 *
 *************************************************************************/
-void IMX135MIPI_SetShutter(kal_uint16 iShutter)
+static void IMX135MIPI_SetShutter(kal_uint16 iShutter)
 {
 	 SENSORDB("[IMX135MIPI]%s():shutter=%d\n",__FUNCTION__,iShutter);
    
@@ -1467,7 +1574,7 @@ void IMX135MIPI_SetShutter(kal_uint16 iShutter)
 * GLOBALS AFFECTED
 *
 *************************************************************************/
-UINT16 IMX135MIPI_read_shutter(void)
+static UINT16 IMX135MIPI_read_shutter(void)
 {
     return (UINT16)( (IMX135MIPI_read_cmos_sensor(0x0202)<<8) | IMX135MIPI_read_cmos_sensor(0x0203) );
 }
@@ -1490,7 +1597,7 @@ UINT16 IMX135MIPI_read_shutter(void)
 *************************************************************************/
 
 ///is not use in raw sensor
-void IMX135MIPI_NightMode(kal_bool bEnable)
+static void IMX135MIPI_NightMode(kal_bool bEnable)
 {
 #if 0
     /************************************************************************/
@@ -1543,12 +1650,12 @@ void IMX135MIPI_NightMode(kal_bool bEnable)
 * GLOBALS AFFECTED
 *
 *************************************************************************/
-UINT32 IMX135MIPIClose(void)
+static UINT32 IMX135MIPIClose(void)
 {
     return ERROR_NONE;
 }	/* IMX135MIPIClose() */
 
-void IMX135MIPISetFlipMirror(kal_int32 imgMirror)
+static void IMX135MIPISetFlipMirror(kal_int32 imgMirror)
 {
     kal_uint8  iTemp; 
 	
@@ -1588,7 +1695,7 @@ void IMX135MIPISetFlipMirror(kal_int32 imgMirror)
 * GLOBALS AFFECTED
 *
 *************************************************************************/
-UINT32 IMX135MIPIPreview(MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
+static UINT32 IMX135MIPIPreview(MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
                                                 MSDK_SENSOR_CONFIG_STRUCT *sensor_config_data)
 {
     kal_uint16 iStartX = 0, iStartY = 0;
@@ -1667,7 +1774,7 @@ UINT32 IMX135MIPIPreview(MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
 	return ERROR_NONE;
 }	/* IMX135MIPIPreview() */
 
-UINT32 IMX135MIPICapture(MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
+static UINT32 IMX135MIPICapture(MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
                                                 MSDK_SENSOR_CONFIG_STRUCT *sensor_config_data)
 {
    
@@ -1721,7 +1828,7 @@ UINT32 IMX135MIPICapture(MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *image_window,
     return ERROR_NONE;
 }	/* IMX135MIPICapture() */
 
-UINT32 IMX135MIPIGetResolution(MSDK_SENSOR_RESOLUTION_INFO_STRUCT *pSensorResolution)
+static UINT32 IMX135MIPIGetResolution(MSDK_SENSOR_RESOLUTION_INFO_STRUCT *pSensorResolution)
 {
 
     pSensorResolution->SensorPreviewWidth	= IMX135MIPI_REAL_PV_WIDTH;
@@ -1735,7 +1842,7 @@ UINT32 IMX135MIPIGetResolution(MSDK_SENSOR_RESOLUTION_INFO_STRUCT *pSensorResolu
     return ERROR_NONE;
 }   /* IMX135MIPIGetResolution() */
 
-UINT32 IMX135MIPIGetInfo(MSDK_SCENARIO_ID_ENUM ScenarioId,
+static UINT32 IMX135MIPIGetInfo(MSDK_SCENARIO_ID_ENUM ScenarioId,
                                                 MSDK_SENSOR_INFO_STRUCT *pSensorInfo,
                                                 MSDK_SENSOR_CONFIG_STRUCT *pSensorConfigData)
 {
@@ -1888,7 +1995,7 @@ UINT32 IMX135MIPIGetInfo(MSDK_SCENARIO_ID_ENUM ScenarioId,
 }   /* IMX135MIPIGetInfo() */
 
 
-UINT32 IMX135MIPIControl(MSDK_SCENARIO_ID_ENUM ScenarioId, MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *pImageWindow,
+static UINT32 IMX135MIPIControl(MSDK_SCENARIO_ID_ENUM ScenarioId, MSDK_SENSOR_EXPOSURE_WINDOW_STRUCT *pImageWindow,
                                                 MSDK_SENSOR_CONFIG_STRUCT *pSensorConfigData)
 {
 		spin_lock(&imx111_drv_lock);	
@@ -1912,7 +2019,7 @@ UINT32 IMX135MIPIControl(MSDK_SCENARIO_ID_ENUM ScenarioId, MSDK_SENSOR_EXPOSURE_
     return ERROR_NONE;
 } /* IMX135MIPIControl() */
 
-UINT32 IMX135MIPISetVideoMode(UINT16 u2FrameRate)
+static UINT32 IMX135MIPISetVideoMode(UINT16 u2FrameRate)
 {
 		SENSORDB("[IMX135MIPISetVideoMode] frame rate = %d\n", u2FrameRate);
 		kal_uint16 IMX135MIPI_Video_Max_Expourse_Time = 0;
@@ -1944,7 +2051,7 @@ UINT32 IMX135MIPISetVideoMode(UINT16 u2FrameRate)
     return ERROR_NONE;
 }
 
-UINT32 IMX135MIPISetAutoFlickerMode(kal_bool bEnable, UINT16 u2FrameRate)
+static UINT32 IMX135MIPISetAutoFlickerMode(kal_bool bEnable, UINT16 u2FrameRate)
 {
 	kal_uint32 pv_max_frame_rate_lines=0;
 
@@ -1984,7 +2091,7 @@ else
 
 
 
-UINT32 IMX135MIPISetMaxFramerateByScenario(MSDK_SCENARIO_ID_ENUM scenarioId, MUINT32 frameRate) {
+static UINT32 IMX135MIPISetMaxFramerateByScenario(MSDK_SCENARIO_ID_ENUM scenarioId, MUINT32 frameRate) {
 	kal_uint32 pclk;
 	kal_int16 dummyLine;
 	kal_uint16 lineLength,frameHeight;
@@ -2043,7 +2150,7 @@ UINT32 IMX135MIPISetMaxFramerateByScenario(MSDK_SCENARIO_ID_ENUM scenarioId, MUI
 
 
 
-UINT32 IMX135MIPIGetDefaultFramerateByScenario(MSDK_SCENARIO_ID_ENUM scenarioId, MUINT32 *pframeRate) 
+static UINT32 IMX135MIPIGetDefaultFramerateByScenario(MSDK_SCENARIO_ID_ENUM scenarioId, MUINT32 *pframeRate) 
 {
 
 	switch (scenarioId) {
@@ -2070,7 +2177,7 @@ UINT32 IMX135MIPIGetDefaultFramerateByScenario(MSDK_SCENARIO_ID_ENUM scenarioId,
 
 
 
-UINT32 IMX135MIPISetTestPatternMode(kal_bool bEnable)  //daikan
+static UINT32 IMX135MIPISetTestPatternMode(kal_bool bEnable)  //daikan
 {
     SENSORDB("[IMX135MIPISetTestPatternMode] Test pattern enable:%d\n", bEnable);
     
@@ -2084,7 +2191,7 @@ UINT32 IMX135MIPISetTestPatternMode(kal_bool bEnable)  //daikan
     return ERROR_NONE;
 }
 
-UINT32 IMX135MIPIFeatureControl(MSDK_SENSOR_FEATURE_ENUM FeatureId,
+static UINT32 IMX135MIPIFeatureControl(MSDK_SENSOR_FEATURE_ENUM FeatureId,
                                                                 UINT8 *pFeaturePara,UINT32 *pFeatureParaLen)
 {
     UINT16 *pFeatureReturnPara16=(UINT16 *) pFeaturePara;
@@ -2304,7 +2411,7 @@ UINT32 IMX135MIPIFeatureControl(MSDK_SENSOR_FEATURE_ENUM FeatureId,
 }	/* IMX135MIPIFeatureControl() */
 
 
-SENSOR_FUNCTION_STRUCT	SensorFuncIMX135MIPI=
+static SENSOR_FUNCTION_STRUCT	SensorFuncIMX135MIPI=
 {
     IMX135MIPIOpen,
     IMX135MIPIGetInfo,

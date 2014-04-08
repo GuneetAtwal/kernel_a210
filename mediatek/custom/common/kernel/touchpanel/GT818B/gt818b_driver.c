@@ -21,6 +21,9 @@
 #include <linux/proc_fs.h>
 #include <asm/uaccess.h>
 
+
+
+#include "tpd_custom_GT818B.h"
 #include <mach/mt_pm_ldo.h>
 #include <mach/mt_typedefs.h>
 #include <mach/mt_boot.h>
@@ -33,8 +36,6 @@
 #include "cust_gpio_usage.h"
 #endif
 
-#include "tpd_custom_GT818B.h"
-
 #include "gt818_fw.h"
 
 extern struct tpd_device *tpd;
@@ -43,8 +44,9 @@ static int tpd_flag = 0;
 static int tpd_halt=0;
 static struct task_struct *thread = NULL;
 static DECLARE_WAIT_QUEUE_HEAD(waiter);
+static DEFINE_MUTEX(esd_check);
 
-static const int TPD_KEYSFACTORY[TPD_KEY_COUNT] =  {KEY_F1, KEY_F2, KEY_F3};
+
 #ifdef TPD_HAVE_BUTTON 
 static int tpd_keys_local[TPD_KEY_COUNT] = TPD_KEYS;
 static int tpd_keys_dim_local[TPD_KEY_COUNT][4] = TPD_KEYS_DIM;
@@ -110,7 +112,7 @@ int esd_checked_time = 0;
 #define TPD_MAX_POINTS          5
 #define MAX_TRANSACTION_LENGTH 8
 #define I2C_DEVICE_ADDRESS_LEN 2
-#define I2C_MASTER_CLOCK       200       //400 鍙戠幇鍦ㄤ腑鏂腑IIC璧勬簮浼氱敵璇蜂笉鎴愬姛
+#define I2C_MASTER_CLOCK       200       //400 发现在中断中IIC资源会申请不成功
 
 //#define TPD_X_RES 480
 //#define TPD_Y_RES 800
@@ -123,11 +125,10 @@ int esd_checked_time = 0;
 #ifdef MT6575
 extern kal_bool upmu_is_chr_det(void);
 #endif
-
-#ifdef MT6589
+#ifdef MT6577
 extern kal_bool upmu_is_chr_det(void);
 #endif
-
+ 
 #define MAX_I2C_TRANSFER_SIZE (MAX_TRANSACTION_LENGTH - I2C_DEVICE_ADDRESS_LEN)
 
 #define GT818_CONFIG_PROC_FILE "gt818_config"
@@ -344,9 +345,9 @@ static int gt818_config_write_proc(struct file *file, const char *buffer, unsign
     #ifdef MT6575
     kal_bool temp = upmu_is_chr_det();
     #endif 
-    #ifdef MT6589
+	#ifdef MT6577
     kal_bool temp = upmu_is_chr_det();
-    #endif 
+	#endif 
 
     TPD_DEBUG("write count %ld\n", count );
 
@@ -589,16 +590,39 @@ static int tpd_i2c_detect(struct i2c_client *client, struct i2c_board_info *info
 void tpd_reset_fuc(struct i2c_client *client)
 {
 
-    int err=0;
-	TPD_DMESG("[mtk-tpd] tpd_reset_fuc: \n");
-   //power off, need confirm with SA
-    hwPowerDown(MT65XX_POWER_LDO_VGP4,  "TP");
- //   hwPowerDown(MT65XX_POWER_LDO_VGP,  "TP");
+      int err=0;
+	char int_type = 0;
+      TPD_DMESG("[mtk-tpd] tpd_reset_fuc: \n");
+      //power off, need confirm with SA
+#ifdef TPD_POWER_SOURCE_CUSTOM
+	hwPowerDown(TPD_POWER_SOURCE_CUSTOM, "TP");
+#else
+	hwPowerDown(MT65XX_POWER_LDO_VGP2, "TP");
+#endif
+#ifdef TPD_POWER_SOURCE_1800
+	hwPowerDown(TPD_POWER_SOURCE_1800, "TP");
+#endif 
+
 	msleep(20);
-	
-   //power on, need confirm with SA
-    hwPowerOn(MT65XX_POWER_LDO_VGP4, VOL_2800, "TP");
-//    hwPowerOn(MT65XX_POWER_LDO_VGP, VOL_1800, "TP");
+			
+			//INT pin use gpio mode we do not want receive int before touch config done
+      //set gpio mode
+		  mt_set_gpio_mode(GPIO_CTP_EINT_PIN, GPIO_CTP_EINT_PIN_M_GPIO);
+      mt_set_gpio_dir(GPIO_CTP_EINT_PIN, GPIO_DIR_IN);
+      mt_set_gpio_pull_enable(GPIO_CTP_EINT_PIN, GPIO_PULL_DISABLE);
+			
+			
+      //power on, need confirm with SA
+#ifdef TPD_POWER_SOURCE_CUSTOM
+	hwPowerOn(TPD_POWER_SOURCE_CUSTOM, VOL_2800, "TP");
+#else
+	hwPowerOn(MT65XX_POWER_LDO_VGP2, VOL_2800, "TP");
+#endif
+#ifdef TPD_POWER_SOURCE_1800
+	hwPowerOn(TPD_POWER_SOURCE_1800, VOL_1800, "TP");
+#endif
+
+      msleep(20);
 
 	
 	// reset
@@ -626,7 +650,6 @@ void tpd_reset_fuc(struct i2c_client *client)
 			TPD_DMESG( "vendor %02X %02X\n", tpd_info.vendor_id_1, tpd_info.vendor_id_2 );
 			TPD_DMESG( "product %02X %02X\n", tpd_info.product_id_1, tpd_info.product_id_2 );
 			TPD_DMESG( "version %02X %02X\n", tpd_info.version_1, tpd_info.version_2 );
-	
 	}
 
 
@@ -637,57 +660,65 @@ void tpd_reset_fuc(struct i2c_client *client)
     cfg_data[61] = cfg_data_with_charger[61] = (TPD_Y_RES&0xff);//(TPD_RES_Y&0xff);
     cfg_data[62] = cfg_data_with_charger[62] = ((TPD_Y_RES>>8)&0xff);//((TPD_RES_Y>>8)&0xff);    
 #endif 
-    //i2c_write_dummy( client, TPD_HANDSHAKING_START_REG );
-    err = i2c_write_bytes( client, TPD_CONFIG_REG_BASE, cfg_data, CONFIG_LEN );
-   // i2c_write_dummy( client, TPD_HANDSHAKING_END_REG );	
 
+
+    err = i2c_write_bytes( client, TPD_CONFIG_REG_BASE, cfg_data, CONFIG_LEN );
+
+     msleep(100);
+	
+     int_type = ((cfg_data[55]>>3)&0x01);
+     // set INT mode
+    mt_set_gpio_mode(GPIO_CTP_EINT_PIN, GPIO_CTP_EINT_PIN_M_EINT);
+    mt_set_gpio_dir(GPIO_CTP_EINT_PIN, GPIO_DIR_IN);
+    mt_set_gpio_pull_enable(GPIO_CTP_EINT_PIN, GPIO_PULL_DISABLE);
+    //mt_set_gpio_pull_select(GPIO_CTP_EINT_PIN, GPIO_PULL_UP);
+
+    msleep(50);
+
+    mt65xx_eint_set_sens(CUST_EINT_TOUCH_PANEL_NUM, CUST_EINT_TOUCH_PANEL_SENSITIVE);
+    mt65xx_eint_set_hw_debounce(CUST_EINT_TOUCH_PANEL_NUM, CUST_EINT_TOUCH_PANEL_DEBOUNCE_CN);
+    //mt65xx_eint_registration(CUST_EINT_TOUCH_PANEL_NUM, CUST_EINT_TOUCH_PANEL_DEBOUNCE_EN, CUST_EINT_TOUCH_PANEL_POLARITY, tpd_eint_interrupt_handler, 1);
+    if(int_type)
+    {
+    		mt65xx_eint_registration(CUST_EINT_TOUCH_PANEL_NUM, CUST_EINT_TOUCH_PANEL_DEBOUNCE_EN, CUST_EINT_POLARITY_HIGH, tpd_eint_interrupt_handler, 1);
+    }
+    else
+    {
+    		mt65xx_eint_registration(CUST_EINT_TOUCH_PANEL_NUM, CUST_EINT_TOUCH_PANEL_DEBOUNCE_EN, CUST_EINT_POLARITY_LOW, tpd_eint_interrupt_handler, 1);	
+    }
+	
 	TPD_DMESG("[mtk-tpd] tpd_reset_fuc: done\n");
 }
 //
 static int tpd_i2c_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {             
     int err = 0;
-#ifdef HAVE_TOUCH_KEY
-	int retry = 0;
-#endif
+
 #ifdef AUTOUPDATE_FIRMWARE
 
 	u8 version_tmp[2] = {0};
 	char cpf = 0;
 	char i;
 #endif	
-	int ret = 0;
+	//int ret = 0;
 	char int_type = 0;
 #ifdef TPD_RESET_ISSUE_WORKAROUND
     int reset_count = 0;
 
 reset_proc:   
-#ifdef MT6573	
-    // power on CTP
-    mt_set_gpio_mode(GPIO_CTP_EN_PIN, GPIO_CTP_EN_PIN_M_GPIO);
-    mt_set_gpio_dir(GPIO_CTP_EN_PIN, GPIO_DIR_OUT);
-    mt_set_gpio_out(GPIO_CTP_EN_PIN, GPIO_OUT_ONE);
-#endif
-#ifdef MT6575
 
-  //edit by Magnum 2012-9-18 
-    hwPowerDown(MT65XX_POWER_LDO_VGP4,  "TP");
-    msleep(10);
-	
-    //power on, need confirm with SA
-    hwPowerOn(MT65XX_POWER_LDO_VGP4, VOL_2800, "TP");
-//    hwPowerOn(MT65XX_POWER_LDO_VGP, VOL_1800, "TP");      
-#endif
-#ifdef MT6589
-	  //edit by Magnum 2012-9-18 
-    hwPowerDown(MT65XX_POWER_LDO_VGP4,  "TP");
-    msleep(10);
 
-    //power on, need confirm with SA
-    hwPowerOn(MT65XX_POWER_LDO_VGP4, VOL_2800, "TP");
-//    hwPowerOn(MT65XX_POWER_LDO_VGP, VOL_1800, "TP");      
+
+#ifdef TPD_POWER_SOURCE_CUSTOM
+		//power on, need confirm with SA
+	hwPowerOn(TPD_POWER_SOURCE_CUSTOM, VOL_2800, "TP");
+#else
+	hwPowerOn(MT65XX_POWER_LDO_VGP2, VOL_2800, "TP");
 #endif
-    
+#ifdef TPD_POWER_SOURCE_1800
+	hwPowerOn(TPD_POWER_SOURCE_1800, VOL_1800, "TP");
+#endif
+
     // set INT mode
     mt_set_gpio_mode(GPIO_CTP_EINT_PIN, GPIO_CTP_EINT_PIN_M_GPIO);
     mt_set_gpio_dir(GPIO_CTP_EINT_PIN, GPIO_DIR_IN);
@@ -703,48 +734,24 @@ reset_proc:
     msleep(50);
 
 #else
-#ifdef MT6575
-    //power on, need confirm with SA
-    hwPowerOn(MT65XX_POWER_LDO_VGP4, VOL_2800, "TP");
- //   hwPowerOn(MT65XX_POWER_LDO_VGP, VOL_1800, "TP");  
-#endif    
-#ifdef MT6589
-    //power on, need confirm with SA
-    hwPowerOn(MT65XX_POWER_LDO_VGP4, VOL_2800, "TP");
-//    hwPowerOn(MT65XX_POWER_LDO_VGP, VOL_1800, "TP");  
-#endif    
-    
+
+#ifdef TPD_POWER_SOURCE_CUSTOM
+		//power on, need confirm with SA
+	hwPowerOn(TPD_POWER_SOURCE_CUSTOM, VOL_2800, "TP");
+#else
+	hwPowerOn(MT65XX_POWER_LDO_VGP2, VOL_2800, "TP");
+#endif
+#ifdef TPD_POWER_SOURCE_1800
+	hwPowerOn(TPD_POWER_SOURCE_1800, VOL_1800, "TP");
+#endif
+
+
     // set deep sleep off
     mt_set_gpio_mode(GPIO_CTP_RST_PIN, GPIO_CTP_RST_PIN_M_GPIO);
     mt_set_gpio_dir(GPIO_CTP_RST_PIN, GPIO_DIR_OUT);
     mt_set_gpio_out(GPIO_CTP_RST_PIN, GPIO_OUT_ONE);  
     msleep(10);  
-#ifdef MT6573
-    // power down CTP
-    mt_set_gpio_mode(GPIO_CTP_EN_PIN, GPIO_CTP_EN_PIN_M_GPIO);
-    mt_set_gpio_dir(GPIO_CTP_EN_PIN, GPIO_DIR_OUT);
-    mt_set_gpio_out(GPIO_CTP_EN_PIN, GPIO_OUT_ZERO);
-    msleep(10);
 
-    // power on CTP
-    mt_set_gpio_mode(GPIO_CTP_EN_PIN, GPIO_CTP_EN_PIN_M_GPIO);
-    mt_set_gpio_dir(GPIO_CTP_EN_PIN, GPIO_DIR_OUT);
-    mt_set_gpio_out(GPIO_CTP_EN_PIN, GPIO_OUT_ONE);
-    msleep(50);
-#endif    
-#ifdef MT6589
-    // power down CTP
-    mt_set_gpio_mode(GPIO_CTP_EN_PIN, GPIO_CTP_EN_PIN_M_GPIO);
-    mt_set_gpio_dir(GPIO_CTP_EN_PIN, GPIO_DIR_OUT);
-    mt_set_gpio_out(GPIO_CTP_EN_PIN, GPIO_OUT_ZERO);
-    msleep(10);
-
-    // power on CTP
-    mt_set_gpio_mode(GPIO_CTP_EN_PIN, GPIO_CTP_EN_PIN_M_GPIO);
-    mt_set_gpio_dir(GPIO_CTP_EN_PIN, GPIO_DIR_OUT);
-    mt_set_gpio_out(GPIO_CTP_EN_PIN, GPIO_OUT_ONE);
-    msleep(50);
-#endif        
 #endif
      
     memset( &tpd_info, 0, sizeof( struct tpd_info_t ) );
@@ -761,8 +768,6 @@ reset_proc:
             goto reset_proc;
         }
 #endif
-        //edit by Magnum 2012-9-18 
-        hwPowerDown(MT65XX_POWER_LDO_VGP4,  "TP");
         return err;
     }
     else
@@ -883,10 +888,10 @@ reset_proc:
     }
 
 #ifdef HAVE_TOUCH_KEY
-	for(retry = 0; retry < MAX_KEY_NUM; retry++)
-	{
-		input_set_capability(tpd->dev,EV_KEY,tpd_keys_local[retry]);	  //edit by Magnum
-	}
+	//for(retry = 0; retry < MAX_KEY_NUM; retry++)
+	//{
+	///	input_set_capability(tpd->dev,EV_KEY,touch_key_array[retry]);	
+	//}
 #endif
  
 
@@ -926,7 +931,7 @@ tpd_esd_check_workqueue = create_workqueue("tpd_esd_check");
 	
 INIT_DELAYED_WORK(&tpd_esd_check_work, tpd_esd_check_func);
 	
-ret = queue_delayed_work(tpd_esd_check_workqueue, &tpd_esd_check_work,ESD_CHECK_CIRCLE);
+err = queue_delayed_work(tpd_esd_check_workqueue, &tpd_esd_check_work,ESD_CHECK_CIRCLE);
 #endif
 
     tpd_load_status = 1;
@@ -962,10 +967,10 @@ static force_reset_guitar()
 	
 #ifdef MT6575
 //Power off TP
-	hwPowerDown(MT65XX_POWER_LDO_VGP4, "TP");
+	hwPowerDown(MT65XX_POWER_LDO_VGP2, "TP");
 	msleep(30);
 //Power on TP
-	hwPowerOn(MT65XX_POWER_LDO_VGP4, VOL_2800, "TP");
+	hwPowerOn(MT65XX_POWER_LDO_VGP2, VOL_2800, "TP");
 	msleep(30);
 #endif
 
@@ -991,61 +996,69 @@ static force_reset_guitar()
 #endif
 static int check_IC_sample(void) //
 {
-    int err =0;
-    int i=0;
-    //int j =0;
-    u8 raw_buffer_curr[10] = {0};
-    u8 raw_buffer_last[10] = {0};
-    int check_count =0;
-    for(i =0; i<4; i++)
-    {
-        i2c_write_dummy( i2c_client, TPD_HANDSHAKING_START_REG );
-        err = i2c_read_bytes( i2c_client, 0x880, raw_buffer_curr, 10 );
-        i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG ); 
-#if 0
-        printk( " raw_buffer_curr: \n");
-        for(j=0;j<10;j++)
-        {
-           printk( " %x ",raw_buffer_curr[j]);
-        }
+      int err =0;
+	int i=0;
+//	int j =0;
+       u8 raw_buffer_curr[10] = {0};
+	u8 raw_buffer_last[10] = {0};
+	int check_count =0;
+	for(i =0; i<4; i++)
+	{
+	     i2c_write_dummy( i2c_client, TPD_HANDSHAKING_START_REG );
+	     err = i2c_read_bytes( i2c_client, 0x880, raw_buffer_curr, 10 );
+	     i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG ); 
+#if 0		 
+           printk( " raw_buffer_curr: \n");
+           for(j=0;j<10;j++)
+           {
+               printk( " %x ",raw_buffer_curr[j]);
+           }
+	     
+		 
+	     printk( "\n raw_buffer_last: \n");
+	     for(j=0;j<10;j++)
+           {
+               printk( " %x ",raw_buffer_last[j]);
+           }
+	     
+#endif		 
+	     if(0 == memcmp(raw_buffer_last,raw_buffer_curr,10))
+	     {
+	        
+	        check_count++;
+	        TPD_DMESG( " check_count =%d \n",check_count); 
+	     }
 
-        printk( "\n raw_buffer_last: \n");
-        for(j=0;j<10;j++)
-        {
-            printk( " %x ",raw_buffer_last[j]);
-        }
+           memcpy(raw_buffer_last,raw_buffer_curr,10);
+	     msleep(500);
+	}
 
-#endif
-        if(0 == memcmp(raw_buffer_last,raw_buffer_curr,10))
-        {
-            check_count++;
-          TPD_DMESG( " check_count =%d \n",check_count);
-        }
-
-        memcpy(raw_buffer_last,raw_buffer_curr,10);
-        msleep(500);
-    }
-
-    if(3 == check_count)
-    {
-        TPD_DMESG( "ic do not sample \n");
-        return -1;
-    }
+       if(3 == check_count)
+       {
+             TPD_DMESG( "ic do not sample \n"); 
+	   	return -1;
+       }
 
 	return 0;
+	
 }
 
 static void tpd_esd_check_func(struct work_struct *work)
 {   
-//	int ret = -1;
+	//int ret = -1;
 	int i;
 	int err = 0;
 	TPD_DMESG( "tpd_esd_check_func++\n");
+	mutex_lock(&esd_check);
 	if (tpd_halt)
 	{
-	    TPD_DMESG( "tpd_esd_check_func return ..\n");
+	      mutex_unlock(&esd_check);
+	      TPD_DMESG( "tpd_esd_check_func return ..\n");
 		return;
 	}
+	//do not print error  msg if ack error
+	i2c_client->addr = i2c_client->addr | I2C_A_FILTER_MSG;
+	
 	//check raw data if IC do not sample reset touch IC
 	err =  check_IC_sample();
 	if(err)
@@ -1082,6 +1095,10 @@ static void tpd_esd_check_func(struct work_struct *work)
 	{
 		queue_delayed_work(tpd_esd_check_workqueue, &tpd_esd_check_work, ESD_CHECK_CIRCLE);
 	}
+
+	//do not print error  msg if ack error
+	i2c_client->addr = i2c_client->addr & (~I2C_A_FILTER_MSG);
+	mutex_unlock(&esd_check);
 	TPD_DMESG( "tpd_esd_check_func--\n");
 	return;
 }
@@ -1130,6 +1147,43 @@ static void tpd_up(int x, int y, int id)
     //TPD_DEBUG_PRINT_POINT( x, y, 0 );
 }
 
+#ifdef HAVE_TOUCH_KEY
+static  void tpd_down2(int x, int y) 
+{
+	 input_report_abs(tpd->dev, ABS_PRESSURE, 8);
+	 input_report_key(tpd->dev, BTN_TOUCH, 1);
+	 input_report_abs(tpd->dev, ABS_MT_TOUCH_MAJOR, 8);
+	 input_report_abs(tpd->dev, ABS_MT_POSITION_X, x);
+	 input_report_abs(tpd->dev, ABS_MT_POSITION_Y, y);
+	 input_mt_sync(tpd->dev);
+	 //TPD_DMESG( "tpd_down2  \n");
+	 if (FACTORY_BOOT == get_boot_mode()|| RECOVERY_BOOT == get_boot_mode())
+       {   
+            //TPD_DMESG( "tpd_down2 button  \n");
+            tpd_button(x, y, 1); 
+       } 
+	 input_sync(tpd->dev);
+
+      
+ }
+ 
+static void  tpd_up2(int x, int y)
+{
+		// input_report_abs(tpd->dev, ABS_PRESSURE, 0);
+		 input_report_key(tpd->dev, BTN_TOUCH, 0);
+		 //input_report_abs(tpd->dev, ABS_MT_TOUCH_MAJOR, 0);
+		 input_mt_sync(tpd->dev);
+	//TPD_DMESG( "tpd_up2  \n");
+       if (FACTORY_BOOT == get_boot_mode()|| RECOVERY_BOOT == get_boot_mode())
+       {   
+           //TPD_DMESG( "tpd_up2 button\n");
+           tpd_button(x, y, 0); 
+       }
+       input_sync(tpd->dev);
+        
+ }
+
+#endif
 static int touch_event_handler(void *unused)
 {
     struct sched_param param = { .sched_priority = RTPM_PRIO_TPD }; 
@@ -1180,20 +1234,12 @@ static int touch_event_handler(void *unused)
 
 #ifdef TPD_CONDITION_SWITCH
         /* Workaround for common mode noise */
-#ifdef MT6573        
-        temp = *(volatile u32 *)CHR_CON0;
-        temp &= (1<<13);
-#endif
-#ifdef MT6575
-        temp = upmu_is_chr_det();
-        //TPD_DMESG("check charge, status:%d \n", upmu_is_chr_det());
-#endif        
-#ifdef MT6589
-        temp = upmu_is_chr_det();
-        //TPD_DMESG("check charge, status:%d \n", upmu_is_chr_det());
-#endif        
 
-	cfg = NULL;
+	temp = upmu_is_chr_det();
+	//TPD_DMESG("check charge, status:%d \n", upmu_is_chr_det());
+      
+
+        cfg = NULL;
 
         if ( temp ) // charger is on
         {
@@ -1218,7 +1264,7 @@ static int touch_event_handler(void *unused)
 
         if ( cfg )
         {
-            TPD_DEBUG("[mtk-tpd] charger change  rewrite config \n");
+            TPD_DMESG("[mtk-tpd] charger change  rewrite config \n");
             i2c_write_bytes( i2c_client, TPD_CONFIG_REG_BASE, cfg, CONFIG_LEN );
             i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG );
             continue;
@@ -1242,51 +1288,52 @@ static int touch_event_handler(void *unused)
             TPD_DEBUG("[mtk-tpd] tpd=%x,  tpd->dev=%x\n",tpd, tpd->dev );
             continue;
         }
+        
 
-        if ( 0x0f == buffer[0] )        // send cfg again!!
+	  if ( 0x0f == buffer[0] )        // send cfg again!!
         {
-            TPD_DMESG("[mtk-tpd] STATUS error : %x\n", buffer[0]);
-            TPD_DMESG("[mtk-tpd] dumpt  error config: \n");
+              TPD_DMESG("[mtk-tpd] STATUS error : %x\n", buffer[0]);
+	       TPD_DMESG("[mtk-tpd] dumpt  error config: \n");
 		   
-            //i2c_write_dummy( i2c_client, TPD_HANDSHAKING_START_REG );	
-            i2c_read_bytes( i2c_client, TPD_CONFIG_REG_BASE, temp_data, CONFIG_LEN);
-            //i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG );	
-            for ( i = 0 ; i < CONFIG_LEN ; i++ )
+		//i2c_write_dummy( i2c_client, TPD_HANDSHAKING_START_REG );	
+	       i2c_read_bytes( i2c_client, TPD_CONFIG_REG_BASE, temp_data, CONFIG_LEN);
+             //i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG );	
+	      for ( i = 0 ; i < CONFIG_LEN ; i++ )
             {
-                TPD_DEBUG( "0x%02X ", temp_data[i] );
-                if ( i%8 == 7 )
-                TPD_DEBUG("\n" );
+               printk( "0x%02X ", temp_data[i] );
+               if ( i%8 == 7 )
+               printk("\n" );
             }    
 	
-            TPD_DMESG("[mtk-tpd] dumpt  error config done \n");
-
+	      TPD_DMESG("[mtk-tpd] dumpt  error config done \n");
+		
             tpd_reset_fuc(i2c_client);
 		   
             TPD_DMESG("[mtk-tpd] dumpt  config again : \n");
-            //i2c_write_dummy( i2c_client, TPD_HANDSHAKING_START_REG );
-            i2c_read_bytes( i2c_client, TPD_CONFIG_REG_BASE, temp_data, CONFIG_LEN);
+	      //i2c_write_dummy( i2c_client, TPD_HANDSHAKING_START_REG );	
+	      i2c_read_bytes( i2c_client, TPD_CONFIG_REG_BASE, temp_data, CONFIG_LEN);
             //i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG );	
-            for ( i = 0 ; i < CONFIG_LEN ; i++ )
+	      for ( i = 0 ; i < CONFIG_LEN ; i++ )
             {
-                TPD_DEBUG( "0x%02X ", temp_data[i] );
-                if ( i%8 == 7 )
-                TPD_DEBUG("\n" );
+               printk( "0x%02X ", temp_data[i] );
+               if ( i%8 == 7 )
+               printk("\n" );
             }    
-            TPD_DMESG("[mtk-tpd] dumpt config done \n");
-            i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG );
-            continue;
+		TPD_DMESG("[mtk-tpd] dumpt config done \n");
+		i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG );
+             continue;
         }
 
-        if ( (buf_status&0x30) != 0x20 )        //data not ready锛宻o return
+	  if ( (buf_status&0x30) != 0x20 )        //data not ready，so return
         {
             TPD_DMESG("[mtk-tpd] STATUS : %x\n", buffer[0]);
             TPD_DMESG("[mtk-tpd] data not ready return \n");
-            //	tpd_reset_fuc(i2c_client);
+		//	tpd_reset_fuc(i2c_client);
             //i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG );  //kuuga  add 11082401
             continue;
         }
-		    
-        if ( finger_num > 5 )        //abnormal state 锛宻o return
+	      
+        if ( finger_num > 5 )        //abnormal state ，so return
         {
             TPD_DMESG("[mtk-tpd] finger_num =%d abnormal state  !\n",finger_num);
 			TPD_DMESG("[mtk-tpd] STATUS  : %x\n", buffer[0]);
@@ -1315,7 +1362,7 @@ static int touch_event_handler(void *unused)
             {
                 x = ptr[1] + (((int)ptr[2]) << 8);
                 y = ptr[3] + (((int)ptr[4]) << 8);
-                size = ptr[5] + (((int)ptr[6]) << 8);	   
+                size = ptr[5] + (((int)ptr[6]) << 8);
 
                 wrap_x = TPD_WARP_X(x);
 				wrap_y = TPD_WARP_Y(y);
@@ -1332,20 +1379,13 @@ static int touch_event_handler(void *unused)
 				{ 
 				  wrap_y = wrap_y+1;
 				}
-				if(TPD_Y_RES <= TPD_WARP_Y(y))
+				if(TPD_Y_RES==TPD_WARP_Y(y))
 				{
-				  wrap_y=TPD_Y_RES-1;
+				  wrap_y=wrap_y-1;
 				}
- 
-				//edit by Magnum 2012-9-4 solve Edge sensitivity
-	      /*      if(wrap_x <= 50)
-			   wrap_x = wrap_x + (50 - wrap_x)/5;                       
-				if(wrap_x >= 429)
-			   wrap_x = (4 * wrap_x + 429)/5;*/
-            
-			   	
-				TPD_DEBUG(" RAW x=%d, y=%d, size=%d \n",x, y, size);
+
                 tpd_down( wrap_x, wrap_y, size, id);
+
                 cur_mask |= ( 1 << id );
                 x_history[id] = x;
                 y_history[id] = y;
@@ -1383,39 +1423,29 @@ static int touch_event_handler(void *unused)
 #endif
 
 #ifdef HAVE_TOUCH_KEY
-	if((last_key == 0)&&(key == 0))
-		;
-	else
-	{
-	    if (FACTORY_BOOT == get_boot_mode()|| RECOVERY_BOOT == get_boot_mode())
-    	{
-    	    for(count = 0; count < MAX_KEY_NUM; count++)
-			{
-				input_report_key(tpd->dev, tpd_keys_local[count], !!(key&(0x01<<count)));		
-			} 
-		}
-		else
-		{
-		    if(key > 0)
-				finger_num = 1;
-		    if(key == 1)
-		    {
-	          //  TPD_DEBUG("Magnum menu key....\n");
-				tpd_down(TPD_CUST_KEY_X1, TPD_CUST_KEY_Y ,12800,1);
-			}
-			else if(key == 2)
-			{
-			  // 	TPD_DEBUG("Magnum home key....\n");
-				tpd_down(TPD_CUST_KEY_X2, TPD_CUST_KEY_Y,12800,1);
-				}
-			else if(key == 4)
-			{
-			 //   TPD_DEBUG("Magnum return key....\n");
-				tpd_down(TPD_CUST_KEY_X3, TPD_CUST_KEY_Y,12800,1);
-			} 
-		}
-	}		
-	last_key = key;	
+	        if((last_key == 0)&&(key == 0))
+		     ;
+	        else
+	        {
+		     for(count = 0; count < 4; count++)
+		     {
+			  //input_report_key(tpd->dev, touch_key_array[count], !!(key&(0x01<<count)));
+			  if( key&(0x01<<count) ) //key=1 menu ;key=2 home; key =4 back; key=8 search
+			  {
+			     wrap_x =touch_key_point_maping_array[count].point_x;
+			     wrap_y = touch_key_point_maping_array[count].point_y;
+			     TPD_DMESG("button =%d %d\n",wrap_x,wrap_y);
+			     
+			     tpd_down2( wrap_x, wrap_y);
+			  }
+		     }
+		     if((last_key!=0)&&(key ==0))
+		     {
+		        tpd_up2( 0, 0);
+		     }
+	        }		
+	       
+		 
 #endif
         // linux kernel update from 2.6.35 --> 3.0
         if(finger_num)
@@ -1425,12 +1455,26 @@ static int touch_event_handler(void *unused)
         }
 		else
 		{
-		   if ( tpd != NULL && tpd->dev != NULL )
+#ifdef HAVE_TOUCH_KEY
+
+		   if ( tpd != NULL && tpd->dev != NULL && 0==key && 0==last_key )
+		   {
+		      //input_mt_sync(tpd->dev);
+	
+			 last_key = key;	
+
+		      tpd_up( TPD_WARP_X(x_history[idx]), TPD_WARP_Y(y_history[idx]), idx); 
+		      input_sync(tpd->dev);
+		   }
+#else
+		    if ( tpd != NULL && tpd->dev != NULL )
 		   {
 		      //input_mt_sync(tpd->dev);
 		      tpd_up( TPD_WARP_X(x_history[idx]), TPD_WARP_Y(y_history[idx]), idx); 
 		      input_sync(tpd->dev);
 		   }
+		   
+#endif
 		}
 
 
@@ -1443,7 +1487,7 @@ static int touch_event_handler(void *unused)
 
 static int tpd_local_init(void) 
 {
-    int boot_mode = get_boot_mode();
+
     if(i2c_add_driver(&tpd_i2c_driver)!=0)
     {
         TPD_DMESG("unable to add i2c driver.\n");
@@ -1476,18 +1520,6 @@ static int tpd_local_init(void)
     tpd->dev->id.product = (tpd_info.product_id_2 << 8 ) | tpd_info.product_id_1;
     tpd->dev->id.version = (tpd_info.version_2 << 8 ) | tpd_info.version_1;
 
-	#ifdef TPD_HAVE_BUTTON     
-    if (FACTORY_BOOT == boot_mode)
-    {
-    int i ;
-	for (i = 0; i < TPD_KEY_COUNT ; i++)
-	    tpd_keys_local[i] = TPD_KEYSFACTORY[i];
-    }
-    
-    tpd_button_setting(TPD_KEY_COUNT, tpd_keys_local, tpd_keys_dim_local);// initialize tpd button data
-#endif   
-
-
     TPD_DMESG("end %s, %d\n", __FUNCTION__, __LINE__);  
     tpd_type_cap = 1;
 
@@ -1500,31 +1532,24 @@ static void tpd_suspend( struct early_suspend *h )
 {
     u8 mode = 0x01;
 	TPD_DMESG("tpd_suspend\n");  
+	mutex_lock(&esd_check);
 #if 0 // workaround for force tpd into sleep mode   
     mt_set_gpio_mode(GPIO_CTP_EINT_PIN, GPIO_CTP_EINT_PIN_M_GPIO);
     mt_set_gpio_dir(GPIO_CTP_EINT_PIN, GPIO_DIR_OUT);
     mt_set_gpio_out(GPIO_CTP_EINT_PIN, GPIO_OUT_ZERO);
 #endif
     tpd_halt = 1;     
-#ifdef ESD_PROTECT
-	//cancel_delayed_work(tpd_esd_check_workqueue);
+#ifdef ESD_PROTECT  
+     cancel_delayed_work(&tpd_esd_check_work);
 #endif
 
-    msleep(1);
+    msleep(1);     
     i2c_write_dummy( i2c_client, TPD_HANDSHAKING_START_REG );
     i2c_write_bytes( i2c_client, TPD_POWER_MODE_REG, &mode, 1 );
     i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG );    
     mt65xx_eint_mask(CUST_EINT_TOUCH_PANEL_NUM);
-
-	//edit by Magnum 2012-9-4  power down when suspend
-	printk("gt818b reset low ..\n");
-	mt_set_gpio_mode(GPIO_CTP_RST_PIN, GPIO_CTP_RST_PIN_M_GPIO);
-    mt_set_gpio_dir(GPIO_CTP_RST_PIN, GPIO_DIR_OUT);
-    mt_set_gpio_out(GPIO_CTP_RST_PIN, GPIO_OUT_ZERO); 
-	hwPowerDown(MT65XX_POWER_LDO_VGP4, "TP");
-	msleep(50); 
 #if 0//#ifdef MT6575, using PMIC Power off leakage 0.3mA, sleep mode: 0.1mA    
-    hwPowerDown(MT65XX_POWER_LDO_VGP4, "TP");
+    hwPowerDown(MT65XX_POWER_LDO_VGP2, "TP");
     hwPowerDown(MT65XX_POWER_LDO_VGP, "TP");
     /* Pull down EINT PIN and RST PIN */    
     mt_set_gpio_mode(GPIO_CTP_EINT_PIN, GPIO_CTP_EINT_PIN_M_GPIO);
@@ -1538,6 +1563,7 @@ static void tpd_suspend( struct early_suspend *h )
 #endif    
     //mt_set_gpio_out(GPIO_CTP_RST_PIN, GPIO_OUT_ZERO);
     //return 0;
+    mutex_unlock(&esd_check);
     TPD_DMESG("tpd_suspend ok\n"); 
 }
 
@@ -1552,24 +1578,13 @@ static void tpd_resume( struct early_suspend *h )
 #endif
     TPD_DMESG(TPD_DEVICE " tpd_resume start \n"); 	
 #if 0 //#ifdef MT6575, using PMIC Power off leakage 0.3mA, sleep mode: 0.1mA   
-    hwPowerOn(MT65XX_POWER_LDO_VGP4, VOL_2800, "TP");
+    hwPowerOn(MT65XX_POWER_LDO_VGP2, VOL_2800, "TP");
     hwPowerOn(MT65XX_POWER_LDO_VGP, VOL_1800, "TP"); 
 #endif    
 #ifdef TPD_RESET_ISSUE_WORKAROUND
     
 #if 1 //#ifdef MT6573, using PMIC Power off leakage 0.3mA, sleep mode: 0.1mA      
     // use raising edge of INT to wakeup
-	hwPowerOn(MT65XX_POWER_LDO_VGP4, VOL_2800, "TP");
-	printk("gt818b reset high ..\n");
-
-	mt_set_gpio_mode(GPIO_CTP_RST_PIN, GPIO_CTP_RST_PIN_M_GPIO);
-	mt_set_gpio_dir(GPIO_CTP_RST_PIN, GPIO_DIR_OUT);
-	mt_set_gpio_out(GPIO_CTP_RST_PIN, GPIO_OUT_ZERO);
-    msleep(1);
-	
-	mt_set_gpio_out(GPIO_CTP_RST_PIN, GPIO_OUT_ONE);
-	msleep(50);  // 20
-	
     mt_set_gpio_mode(GPIO_CTP_EINT_PIN, GPIO_CTP_EINT_PIN_M_GPIO);
     mt_set_gpio_dir(GPIO_CTP_EINT_PIN, GPIO_DIR_OUT);
     mt_set_gpio_out(GPIO_CTP_EINT_PIN, GPIO_OUT_ZERO);
@@ -1580,8 +1595,6 @@ static void tpd_resume( struct early_suspend *h )
     msleep(1);
     mt_set_gpio_mode(GPIO_CTP_EINT_PIN, GPIO_CTP_EINT_PIN_M_EINT);
     mt_set_gpio_dir(GPIO_CTP_EINT_PIN, GPIO_DIR_IN);
-
-	
  #endif
 #if 0 //#ifdef MT6575, using PMIC Power off leakage 0.3mA, sleep mode: 0.1mA 
      // set INT mode
@@ -1627,28 +1640,6 @@ static void tpd_resume( struct early_suspend *h )
         TPD_DMESG( "vendor %02X %02X\n", tpd_info.vendor_id_1, tpd_info.vendor_id_2 );
         TPD_DMESG( "product %02X %02X\n", tpd_info.product_id_1, tpd_info.product_id_2 );
         TPD_DMESG( "version %02X %02X\n", tpd_info.version_1, tpd_info.version_2 );
-		//edit by Magnum 2012-9-8  write config file to IC when resume
-		if ( tpd_info.version_1 < 0x7A ) // Chip version B    or Version C 
-	    {
-	        TPD_DMESG(TPD_DEVICE " read version %02X , use B version config\n", tpd_info.version_1 );
-			TPD_DMESG(TPD_DEVICE " B version: 0x4B~0x59, C version 0x5A~0x79\n" );
-	        cfg_data = cfg_data_version_b;
-	        cfg_data_with_charger = cfg_data_with_charger_version_b;
-	    }
-	    else if ( tpd_info.version_1 < 0xA0 ) 
-	    {
-	        TPD_DMESG(TPD_DEVICE " read version %02X, use D version config\n", tpd_info.version_1 );
-			TPD_DMESG(TPD_DEVICE "  D version: 0x7A~0x99, E version 0x9A~0xB9\n" );
-	        cfg_data = cfg_data_version_d;
-	        cfg_data_with_charger = cfg_data_with_charger_version_d;
-	    }
-	    else
-	    {
-	        TPD_DMESG(TPD_DEVICE " unknow Chip version %02X ,use B version config\n", tpd_info.version_1 );
-	        cfg_data = cfg_data_version_b;
-	        cfg_data_with_charger = cfg_data_with_charger_version_b;
-	    }
-		err = i2c_write_bytes( i2c_client, TPD_CONFIG_REG_BASE, cfg_data, CONFIG_LEN );
     }
       
     i2c_write_dummy( i2c_client, TPD_HANDSHAKING_END_REG );
@@ -1673,9 +1664,6 @@ static struct tpd_driver_t tpd_device_driver =
 #else
     .tpd_have_button = 0,
 #endif		
-    .tpd_x_res = TPD_CUST_RES_X,
-    .tpd_y_res = TPD_CUST_RES_Y,	//including button area
-    
 };
 
 /* called when loaded into kernel */
