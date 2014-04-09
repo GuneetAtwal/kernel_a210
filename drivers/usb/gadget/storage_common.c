@@ -852,8 +852,6 @@ static ssize_t fsg_show_nofua(struct device *dev, struct device_attribute *attr,
 	return sprintf(buf, "%u\n", curlun->nofua);
 }
 
-<<<<<<< HEAD
-=======
 static ssize_t fsg_show_cdrom (struct device *dev, struct device_attribute *attr,
 			   char *buf)
 {
@@ -899,7 +897,6 @@ static ssize_t fsg_store_perf(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 #endif
->>>>>>> 4712983... usb: gadget: mass_storage: added sysfs entry for cdrom to LUNs
 static ssize_t fsg_show_file(struct device *dev, struct device_attribute *attr,
 			     char *buf)
 {
