@@ -1,7 +1,7 @@
 /*
  *
  * Automatically generated file; DO NOT EDIT.
- * Linux/arm 3.4.4 Kernel Configuration
+ * Linux/arm 3.4.7 Kernel Configuration
  *
  */
 #define CONFIG_IP6_NF_SECURITY 1
@@ -157,6 +157,7 @@
 #define CONFIG_PM_AUTOSLEEP 1
 #define CONFIG_HAS_WAKELOCK 1
 #define CONFIG_LOGO 1
+#define CONFIG_KERNEL_XZ 1
 #define CONFIG_USB_STORAGE 1
 #define CONFIG_STANDALONE 1
 #define CONFIG_CPU_FREQ_GOV_PERFORMANCE 1
@@ -433,7 +434,6 @@
 #define CONFIG_HAS_IOMEM 1
 #define CONFIG_PPPOPNS 1
 #define CONFIG_TOI_FILE 1
-#define CONFIG_KERNEL_LZO 1
 #define CONFIG_GENERIC_IRQ_PROBE 1
 #define CONFIG_USB_STORAGE_SDDR09 1
 #define CONFIG_NET_CLS_IND 1
@@ -521,6 +521,7 @@
 #define CONFIG_LIBCRC32C 1
 #define CONFIG_ARCH_NR_GPIO 0
 #define CONFIG_GENERIC_BUG 1
+#define CONFIG_CRYPTO_SHA256 1
 #define CONFIG_HAVE_FTRACE_MCOUNT_RECORD 1
 #define CONFIG_INET_TCP_DIAG 1
 #define CONFIG_HID_SONY 1
@@ -533,7 +534,7 @@
 #define CONFIG_NEON 1
 #define CONFIG_DEBUG_KERNEL 1
 #define CONFIG_COMPAT_BRK 1
-#define CONFIG_LOCALVERSION "_Blaze.Kernl_test#1"
+#define CONFIG_LOCALVERSION "_Blaze.Kernel-r006"
 #define CONFIG_CRYPTO 1
 #define CONFIG_USB_TRANCEVIBRATOR 1
 #define CONFIG_SCHED_DEBUG 1
